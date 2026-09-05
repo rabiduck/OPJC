@@ -9,8 +9,11 @@
       ".github/**",
       "README.md",
       "wrangler*.jsonc",
-      "schema/**"
-    ]
+      "schema/**",
+      "src/**"
+    ],
+    "binding": "ASSETS",
+    "run_worker_first": true
   },
   "d1_databases": [
     {
@@ -23,5 +26,7 @@
       "database_name": "opjc-prod",
       "database_id": "ef7103a7-c0cd-419c-8ed2-061cba6d18fc"
     }
-  ]
+  ],
+  "main": "src/worker.js",
+  "keep_vars": true
 }
