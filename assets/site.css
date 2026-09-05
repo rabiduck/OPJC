@@ -64,3 +64,23 @@
   .links .btn{margin-top:8px}
   .placeholder-grid{grid-template-columns:1fr}
 }
+
+.calendar-section{margin-bottom:64px}
+.calendar-section:last-child{margin-bottom:0}
+.section-heading{display:grid;grid-template-columns:1fr minmax(260px,420px);gap:30px;align-items:end;margin-bottom:24px}
+.section-heading h2{margin-bottom:0}
+.section-heading>p{margin:0;color:var(--muted)}
+.event-list{display:grid;gap:14px}
+.event-card{display:grid;grid-template-columns:190px 1fr;gap:22px;align-items:start;background:white;border:1px solid var(--line);border-radius:20px;padding:22px 24px;box-shadow:0 8px 30px rgba(18,54,100,.06);border-left:7px solid var(--blue)}
+.event-card.closure{border-left-color:var(--red);background:#fffafa}
+.event-date{font-weight:950;color:var(--blue);text-transform:uppercase;letter-spacing:.04em}
+.event-card.closure .event-date{color:var(--red)}
+.event-body h3{margin:0 0 4px;font-size:1.2rem}
+.event-body p{margin:8px 0 0;color:var(--muted)}
+.event-meta{font-weight:800;color:#4f5965;font-size:.94rem}
+.empty-state{padding:24px;border:1px dashed #cbd2dc;border-radius:18px;color:var(--muted);background:white}
+.closures-section{padding-top:10px}
+@media(max-width:700px){
+  .section-heading{grid-template-columns:1fr;gap:10px}
+  .event-card{grid-template-columns:1fr;gap:8px}
+}
