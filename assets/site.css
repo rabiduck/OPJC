@@ -91,3 +91,11 @@
 @media(max-width:560px){
   .uat-banner{font-size:.75rem}
 }
+
+.auth-wrap{max-width:620px}
+.auth-card{display:grid;gap:18px}
+.auth-card label{display:grid;gap:7px;font-weight:850}
+.auth-card input{width:100%;padding:13px 14px;border:1px solid var(--line);border-radius:12px;background:white;color:var(--ink);font:inherit}
+.auth-card input:focus{outline:3px solid rgba(36,86,154,.15);border-color:var(--blue)}
+.member-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:28px}
+.member-actions form{margin:0}
