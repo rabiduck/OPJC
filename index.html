@@ -12,7 +12,16 @@
   <nav class="nav">
     <div class="container nav-inner">
       <a class="brand" href="/"><span class="mark"><img src="assets/old-priory-logo.webp" alt="Old Priory Judo Club logo"></span><span>Old Priory Judo Club<small>York · Est. 1947</small></span></a>
-      <div class="links"><a class="nav-link" href="/#why">Why judo?</a><a class="nav-link" href="/#classes">Classes</a><a class="nav-link" href="/#new">New starters</a><a class="btn red" href="/#contact">Free trial</a></div>
+      <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="site-menu" aria-label="Open navigation">
+        <span></span><span></span><span></span>
+      </button>
+      <div class="links" id="site-menu">
+        <a class="nav-link" href="/">Home</a>
+        <a class="nav-link" href="/events.html">Events</a>
+        <a class="nav-link" href="/history.html">History</a>
+        <a class="nav-link" href="/instructors.html">Instructors</a>
+        <a class="btn red" href="/#contact">Free trial</a>
+      </div>
     </div>
   </nav>
 
@@ -110,5 +119,6 @@
   </main>
 
   <footer><div class="container foot"><strong>Old Priory Judo Club · York</strong><small>Affiliated with Bushido International / Za-Zen</small></div></footer>
+  <script src="assets/site.js"></script>
 </body>
 </html>
