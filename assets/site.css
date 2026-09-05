@@ -20,7 +20,7 @@
     h1{font-size:clamp(3.3rem,7vw,6.6rem);line-height:.88;letter-spacing:-.065em;margin:.2rem 0 20px;text-transform:uppercase}
     h1 .red{color:var(--red)}h1 .blue{color:var(--blue)}.lead{font-size:1.2rem;color:var(--muted);max-width:700px}
     .actions{display:flex;gap:12px;flex-wrap:wrap;margin:28px 0 24px}.trust{display:flex;gap:22px;flex-wrap:wrap;font-weight:850;color:#123664}.trust b{color:var(--red)}
-    .hero-art{position:relative;min-height:500px;border-radius:30px;background:url("assets/hero-judo.webp") center/cover no-repeat;box-shadow:var(--shadow);border:8px solid white;overflow:hidden}
+    .hero-art{position:relative;min-height:500px;border-radius:30px;background:url("hero-judo.webp") center/cover no-repeat;box-shadow:var(--shadow);border:8px solid white;overflow:hidden}
     
     .mat{display:none}
     .judoka{display:none}
