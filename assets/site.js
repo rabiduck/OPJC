@@ -14,3 +14,52 @@ if(button&&menu){
     }
   });
 }
+
+async function loadCalendarData(){
+  const eventsTarget=document.querySelector('#events-list');
+  const closuresTarget=document.querySelector('#closures-list');
+  if(!eventsTarget||!closuresTarget) return;
+
+  const renderEmpty=(target,message)=>{
+    target.innerHTML='<div class="empty-state">'+message+'</div>';
+  };
+
+  const formatDate=(value)=>{
+    const d=new Date(value+'T12:00:00');
+    return new Intl.DateTimeFormat('en-GB',{
+      weekday:'short',day:'numeric',month:'short',year:'numeric'
+    }).format(d);
+  };
+
+  const renderItems=(target,items,type)=>{
+    if(!items.length){
+      renderEmpty(target,type==='closure'?'No upcoming closures listed.':'No upcoming events listed.');
+      return;
+    }
+    target.innerHTML=items.map(item=>{
+      const location=item.location?'<div class="event-meta">'+item.location+'</div>':'';
+      const description=item.description?'<p>'+item.description+'</p>':'';
+      return '<article class="event-card '+type+'">'+
+        '<div class="event-date">'+formatDate(item.date)+'</div>'+
+        '<div class="event-body"><h3>'+item.title+'</h3>'+location+description+'</div>'+
+      '</article>';
+    }).join('');
+  };
+
+  try{
+    const response=await fetch('assets/events.json',{cache:'no-store'});
+    if(!response.ok) throw new Error('Calendar data could not be loaded');
+    const data=await response.json();
+    const today=new Date();
+    today.setHours(0,0,0,0);
+    const upcoming=(items=[])=>items
+      .filter(item=>new Date(item.date+'T23:59:59')>=today)
+      .sort((a,b)=>a.date.localeCompare(b.date));
+    renderItems(eventsTarget,upcoming(data.events),'event');
+    renderItems(closuresTarget,upcoming(data.closures),'closure');
+  }catch(error){
+    renderEmpty(eventsTarget,'Events are temporarily unavailable.');
+    renderEmpty(closuresTarget,'Closure dates are temporarily unavailable.');
+  }
+}
+loadCalendarData();
