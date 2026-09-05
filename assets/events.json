@@ -1,4 +1,28 @@
 {
-  "events": [],
+  "events": [
+    {
+      "date": "2026-10-10",
+      "title": "Weight Category Competition",
+      "location": "Warsop"
+    },
+    {
+      "date": "2026-11-14",
+      "title": "Team Competition",
+      "location": "York"
+    },
+    {
+      "date": "2026-11-21",
+      "title": "Grading"
+    },
+    {
+      "date": "2026-12-20",
+      "title": "Christmas Party"
+    },
+    {
+      "date": "2027-05-08",
+      "title": "OPJC 80th Anniversary",
+      "description": "Martial arts day and party celebrating 80 years of Old Priory Judo Club."
+    }
+  ],
   "closures": []
 }
