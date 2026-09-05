@@ -1,3 +1,16 @@
+
+// UAT indicator: this code can safely be promoted because it only renders
+// when the site is being viewed on a hostname containing "uat".
+const currentHost=window.location.hostname.toLowerCase();
+if(currentHost.includes('uat')){
+  document.body.classList.add('uat-mode');
+  const banner=document.createElement('div');
+  banner.className='uat-banner';
+  banner.setAttribute('role','status');
+  banner.innerHTML='<strong>UAT</strong><span>Preview environment — not the live site</span>';
+  document.body.prepend(banner);
+}
+
 const button=document.querySelector('.menu-toggle');
 const menu=document.querySelector('#site-menu');
 if(button&&menu){
