@@ -32,7 +32,27 @@
       </div>
     </section>
     <section class="page-content">
-      <div class="container"><div class="page-card"><h2>What’s coming up?</h2><p class="lead">The events system is the next feature to build. This page is now in place so the navigation and site structure can be tested first.</p><p>Once populated, upcoming events will be listed automatically from a small data file, with past events separated from future ones.</p></div></div>
+      <div class="container"><div class="calendar-section">
+        <div class="section-heading">
+          <div>
+            <div class="eyebrow">Dates for your diary</div>
+            <h2>Upcoming events</h2>
+          </div>
+          <p>Gradings, competitions, seminars, special training sessions and club activities.</p>
+        </div>
+        <div id="events-list" class="event-list" aria-live="polite"></div>
+      </div>
+
+      <div class="calendar-section closures-section">
+        <div class="section-heading">
+          <div>
+            <div class="eyebrow">No training</div>
+            <h2>Upcoming closures</h2>
+          </div>
+          <p>Dates when regular club sessions will not be running.</p>
+        </div>
+        <div id="closures-list" class="event-list" aria-live="polite"></div>
+      </div></div>
     </section>
   </main>
   <footer><div class="container foot"><strong>Old Priory Judo Club · York</strong><small>Affiliated with Bushido International / Za-Zen</small></div></footer>
