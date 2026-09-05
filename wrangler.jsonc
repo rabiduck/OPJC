@@ -8,7 +8,20 @@
       ".git/**",
       ".github/**",
       "README.md",
-      "wrangler.jsonc"
+      "wrangler*.jsonc",
+      "schema/**"
     ]
-  }
+  },
+  "d1_databases": [
+    {
+      "binding": "AUTH_DB",
+      "database_name": "opjc-auth",
+      "database_id": "fc783431-28e0-44ac-8d6e-aaff06de6fbe"
+    },
+    {
+      "binding": "APP_DB",
+      "database_name": "opjc-prod",
+      "database_id": "ef7103a7-c0cd-419c-8ed2-061cba6d18fc"
+    }
+  ]
 }
