@@ -24,5 +24,36 @@
       "description": "Martial arts day and party celebrating 80 years of Old Priory Judo Club."
     }
   ],
-  "closures": []
+  "closures": [
+    {
+      "date": "2026-10-02",
+      "title": "Club closed",
+      "description": "No regular training."
+    },
+    {
+      "date": "2026-10-09",
+      "title": "Club closed",
+      "description": "No regular training."
+    },
+    {
+      "date": "2026-10-10",
+      "title": "Club closed",
+      "description": "No regular training."
+    },
+    {
+      "date": "2026-12-25",
+      "title": "Christmas Day",
+      "description": "Club closed — no regular training."
+    },
+    {
+      "date": "2026-12-26",
+      "title": "Boxing Day",
+      "description": "Club closed — no regular training."
+    },
+    {
+      "date": "2026-12-31",
+      "title": "New Year's Eve",
+      "description": "Club closed — no regular training."
+    }
+  ]
 }
