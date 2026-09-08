@@ -60,7 +60,7 @@ async function loadCalendarData(){
   };
 
   try{
-    const response=await fetch('assets/events.json',{cache:'no-store'});
+    const response=await fetch('/api/calendar',{cache:'no-store'});
     if(!response.ok) throw new Error('Calendar data could not be loaded');
     const data=await response.json();
     const today=new Date();
