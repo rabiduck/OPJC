@@ -232,7 +232,8 @@ async function handleSetup(request, env) {
   const count = await env.AUTH_DB.prepare("SELECT COUNT(*) AS count FROM users").first();
   if (Number(count?.count || 0) > 0) return notFound();
 
-  if (!env.BOOTSTRAP_TOKEN) {
+  const bootstrapToken = env.BOOTSTRAP_TOKEN?.get ? await env.BOOTSTRAP_TOKEN.get() : env.BOOTSTRAP_TOKEN;
+  if (!bootstrapToken) {
     return htmlPage("Setup unavailable", `
       <section class="page-content"><div class="container">
         <div class="page-card"><h2>Setup is not enabled.</h2><p>The BOOTSTRAP_TOKEN secret has not been configured.</p></div>
@@ -245,7 +246,7 @@ async function handleSetup(request, env) {
   const email = String(form.get("email") || "").trim();
   const password = String(form.get("password") || "");
 
-  if (!constantTimeEqual(setupKey, env.BOOTSTRAP_TOKEN)) return forbidden();
+  if (!constantTimeEqual(setupKey, bootstrapToken)) return forbidden();
   if (!displayName || !email || password.length < 12) {
     return htmlPage("Invalid setup", `
       <section class="page-content"><div class="container">
