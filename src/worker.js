@@ -60,6 +60,10 @@ export default {
           : methodNotAllowed();
       }
 
+      if (path === "/admin/calendar") {
+        return request.method === "GET" ? adminCalendarPage(request, env) : methodNotAllowed();
+      }
+
       if (path === "/admin/calendar/event") {
         return request.method === "POST"
           ? saveCalendarEvent(request, env)
@@ -239,6 +243,66 @@ async function adminPage(request, env) {
       </div></section>`, 403);
   }
 
+  const now = new Date().toISOString().slice(0, 10);
+  const [eventCount, closureCount, memberCount, inviteCount] = await Promise.all([
+    env.APP_DB.prepare("SELECT COUNT(*) AS count FROM events WHERE event_date >= ?").bind(now).first(),
+    env.APP_DB.prepare("SELECT COUNT(*) AS count FROM closures WHERE closure_date >= ?").bind(now).first(),
+    env.AUTH_DB.prepare("SELECT COUNT(*) AS count FROM users WHERE active=1").first(),
+    env.AUTH_DB.prepare("SELECT COUNT(*) AS count FROM account_tokens WHERE type='invite' AND used_at IS NULL AND expires_at > ?").bind(new Date().toISOString()).first()
+  ]);
+
+  return htmlPage("Admin", `
+    <section class="page-hero admin-hero">
+      <div class="container">
+        <div class="eyebrow">Administration</div>
+        <h1>Club admin</h1>
+        <p class="lead">Welcome back, ${escapeHtml(user.display_name)}.</p>
+      </div>
+    </section>
+    <section class="page-content">
+      <div class="container">
+        <div class="admin-dashboard-grid">
+          <a class="admin-dashboard-card" href="/admin/calendar">
+            <div class="admin-card-icon">📅</div>
+            <div class="eyebrow">Calendar</div>
+            <h2>Events & closures</h2>
+            <p>Manage competitions, gradings, club activities and dates when training is not running.</p>
+            <div class="admin-card-stats"><strong>${Number(eventCount?.count || 0)}</strong> upcoming events · <strong>${Number(closureCount?.count || 0)}</strong> closures</div>
+            <span class="admin-card-link">Manage calendar →</span>
+          </a>
+
+          <a class="admin-dashboard-card" href="/admin/members">
+            <div class="admin-card-icon">👥</div>
+            <div class="eyebrow">Access</div>
+            <h2>Members</h2>
+            <p>Invite members, manage account access, revoke sessions and issue password reset links.</p>
+            <div class="admin-card-stats"><strong>${Number(memberCount?.count || 0)}</strong> active accounts · <strong>${Number(inviteCount?.count || 0)}</strong> pending invites</div>
+            <span class="admin-card-link">Manage members →</span>
+          </a>
+
+          <article class="admin-dashboard-card disabled-card">
+            <div class="admin-card-icon">📚</div>
+            <div class="eyebrow">Coming later</div>
+            <h2>Resources</h2>
+            <p>Member-only syllabuses, club documents and useful downloads will be managed here.</p>
+            <div class="admin-card-stats">Not yet enabled</div>
+          </article>
+        </div>
+
+        <div class="member-actions admin-dashboard-actions">
+          <a class="btn ghost" href="/members">Members area</a>
+          <a class="btn ghost" href="/events.html">View public calendar</a>
+          <form method="post" action="/auth/logout"><button class="btn ghost" type="submit">Sign out</button></form>
+        </div>
+      </div>
+    </section>`);
+}
+
+async function adminCalendarPage(request, env) {
+  const user = await getCurrentUser(request, env);
+  if (!user) return redirect("/members/login?next=/admin");
+  if (user.role !== "admin") return forbidden();
+
   const events = await env.APP_DB.prepare(
     "SELECT id, event_date, title, location, description, featured FROM events ORDER BY event_date, id"
   ).all();
@@ -247,47 +311,62 @@ async function adminPage(request, env) {
   ).all();
 
   const eventRows = (events.results || []).map(row => `
-    <form class="admin-calendar-row" method="post" action="/admin/calendar/event">
-      <input type="hidden" name="id" value="${escapeHtml(row.id)}">
-      <label>Date<input type="date" name="date" value="${escapeHtml(row.event_date)}" required></label>
-      <label>Title<input type="text" name="title" value="${escapeHtml(row.title)}" required></label>
-      <label>Location<input type="text" name="location" value="${escapeHtml(row.location || "")}"></label>
-      <label>Description<textarea name="description" rows="2">${escapeHtml(row.description || "")}</textarea></label>
-      <label class="check-label"><input type="checkbox" name="featured" value="1" ${Number(row.featured) === 1 ? "checked" : ""}> Featured</label>
-      <div class="admin-row-actions">
-        <button class="btn ghost" type="submit">Save</button>
-        <button class="btn danger" type="submit" formaction="/admin/calendar/delete" name="delete_ref" value="event:${escapeHtml(row.id)}">Delete</button>
-      </div>
-    </form>`).join("");
+    <details class="admin-list-item">
+      <summary>
+        <div class="admin-list-date">${escapeHtml(formatShortDate(row.event_date))}</div>
+        <div class="admin-list-main"><strong>${escapeHtml(row.title)}</strong><span>${escapeHtml(row.location || "No location")}</span></div>
+        ${Number(row.featured) === 1 ? '<span class="status-badge pending">Featured</span>' : ""}
+        <span class="admin-edit-label">Edit</span>
+      </summary>
+      <form class="admin-edit-form" method="post" action="/admin/calendar/event">
+        <input type="hidden" name="id" value="${escapeHtml(row.id)}">
+        <label>Date<input type="date" name="date" value="${escapeHtml(row.event_date)}" required></label>
+        <label>Title<input type="text" name="title" value="${escapeHtml(row.title)}" required></label>
+        <label>Location<input type="text" name="location" value="${escapeHtml(row.location || "")}"></label>
+        <label class="admin-form-wide">Description<textarea name="description" rows="3">${escapeHtml(row.description || "")}</textarea></label>
+        <label class="check-label"><input type="checkbox" name="featured" value="1" ${Number(row.featured) === 1 ? "checked" : ""}> Featured</label>
+        <div class="admin-row-actions">
+          <button class="btn red" type="submit">Save changes</button>
+          <button class="btn danger" type="submit" formaction="/admin/calendar/delete" name="delete_ref" value="event:${escapeHtml(row.id)}">Delete</button>
+        </div>
+      </form>
+    </details>`).join("");
 
   const closureRows = (closures.results || []).map(row => `
-    <form class="admin-calendar-row" method="post" action="/admin/calendar/closure">
-      <input type="hidden" name="id" value="${escapeHtml(row.id)}">
-      <label>Date<input type="date" name="date" value="${escapeHtml(row.closure_date)}" required></label>
-      <label>Title<input type="text" name="title" value="${escapeHtml(row.title)}" required></label>
-      <label class="wide-field">Description<textarea name="description" rows="2">${escapeHtml(row.description || "")}</textarea></label>
-      <div class="admin-row-actions">
-        <button class="btn ghost" type="submit">Save</button>
-        <button class="btn danger" type="submit" formaction="/admin/calendar/delete" name="delete_ref" value="closure:${escapeHtml(row.id)}">Delete</button>
-      </div>
-    </form>`).join("");
+    <details class="admin-list-item closure-item">
+      <summary>
+        <div class="admin-list-date">${escapeHtml(formatShortDate(row.closure_date))}</div>
+        <div class="admin-list-main"><strong>${escapeHtml(row.title)}</strong><span>${escapeHtml(row.description || "No regular training")}</span></div>
+        <span class="admin-edit-label">Edit</span>
+      </summary>
+      <form class="admin-edit-form" method="post" action="/admin/calendar/closure">
+        <input type="hidden" name="id" value="${escapeHtml(row.id)}">
+        <label>Date<input type="date" name="date" value="${escapeHtml(row.closure_date)}" required></label>
+        <label>Title<input type="text" name="title" value="${escapeHtml(row.title)}" required></label>
+        <label class="admin-form-wide">Description<textarea name="description" rows="3">${escapeHtml(row.description || "")}</textarea></label>
+        <div class="admin-row-actions">
+          <button class="btn red" type="submit">Save changes</button>
+          <button class="btn danger" type="submit" formaction="/admin/calendar/delete" name="delete_ref" value="closure:${escapeHtml(row.id)}">Delete</button>
+        </div>
+      </form>
+    </details>`).join("");
 
   const isEmpty = !(events.results || []).length && !(closures.results || []).length;
 
-  return htmlPage("Admin", `
-    <section class="page-hero">
+  return htmlPage("Calendar management", `
+    <section class="page-hero admin-hero">
       <div class="container">
-        <div class="eyebrow">Administration</div>
-        <h1>Club admin</h1>
-        <p class="lead">Authenticated as ${escapeHtml(user.display_name)}.</p>
+        <div class="eyebrow">Administration · Calendar</div>
+        <h1>Events & closures</h1>
+        <p class="lead">Manage the dates shown on the public club calendar.</p>
       </div>
     </section>
     <section class="page-content">
       <div class="container">
         <div class="admin-heading">
-          <div><div class="eyebrow">Calendar</div><h2>Events & closures</h2></div>
+          <div><div class="eyebrow">Calendar</div><h2>Manage dates</h2></div>
           <div class="admin-heading-actions">
-            <a class="btn ghost" href="/admin/members">Member access</a>
+            <a class="btn ghost" href="/admin">Admin home</a>
             <a class="btn ghost" href="/events.html">View public calendar</a>
           </div>
         </div>
@@ -296,39 +375,38 @@ async function adminPage(request, env) {
           <div class="page-card import-card">
             <h3>Import the existing calendar</h3>
             <p>The application database is empty. Import the current events and closure dates from the existing site data.</p>
-            <form method="post" action="/admin/calendar/import">
-              <button class="btn red" type="submit">Import existing calendar</button>
-            </form>
+            <form method="post" action="/admin/calendar/import"><button class="btn red" type="submit">Import existing calendar</button></form>
           </div>` : ""}
 
-        <section class="admin-calendar-section">
-          <h3>Events</h3>
-          <form class="admin-calendar-row new-row" method="post" action="/admin/calendar/event">
-            <label>Date<input type="date" name="date" required></label>
-            <label>Title<input type="text" name="title" required></label>
-            <label>Location<input type="text" name="location"></label>
-            <label>Description<textarea name="description" rows="2"></textarea></label>
-            <label class="check-label"><input type="checkbox" name="featured" value="1"> Featured</label>
-            <div class="admin-row-actions"><button class="btn red" type="submit">Add event</button></div>
-          </form>
-          <div class="admin-calendar-list">${eventRows || '<div class="empty-state">No events in the database yet.</div>'}</div>
+        <section class="admin-management-section">
+          <div class="admin-section-title"><div><div class="eyebrow">Upcoming</div><h2>Events</h2></div></div>
+          <details class="admin-add-panel">
+            <summary class="btn red">Add event</summary>
+            <form class="admin-edit-form add-form" method="post" action="/admin/calendar/event">
+              <label>Date<input type="date" name="date" required></label>
+              <label>Title<input type="text" name="title" required></label>
+              <label>Location<input type="text" name="location"></label>
+              <label class="admin-form-wide">Description<textarea name="description" rows="3"></textarea></label>
+              <label class="check-label"><input type="checkbox" name="featured" value="1"> Featured</label>
+              <div class="admin-row-actions"><button class="btn red" type="submit">Create event</button></div>
+            </form>
+          </details>
+          <div class="admin-simple-list">${eventRows || '<div class="empty-state">No events in the database yet.</div>'}</div>
         </section>
 
-        <section class="admin-calendar-section">
-          <h3>Closures</h3>
-          <form class="admin-calendar-row new-row" method="post" action="/admin/calendar/closure">
-            <label>Date<input type="date" name="date" required></label>
-            <label>Title<input type="text" name="title" value="Club closed" required></label>
-            <label class="wide-field">Description<textarea name="description" rows="2"></textarea></label>
-            <div class="admin-row-actions"><button class="btn red" type="submit">Add closure</button></div>
-          </form>
-          <div class="admin-calendar-list">${closureRows || '<div class="empty-state">No closures in the database yet.</div>'}</div>
+        <section class="admin-management-section">
+          <div class="admin-section-title"><div><div class="eyebrow">No training</div><h2>Closures</h2></div></div>
+          <details class="admin-add-panel">
+            <summary class="btn red">Add closure</summary>
+            <form class="admin-edit-form add-form" method="post" action="/admin/calendar/closure">
+              <label>Date<input type="date" name="date" required></label>
+              <label>Title<input type="text" name="title" value="Club closed" required></label>
+              <label class="admin-form-wide">Description<textarea name="description" rows="3"></textarea></label>
+              <div class="admin-row-actions"><button class="btn red" type="submit">Create closure</button></div>
+            </form>
+          </details>
+          <div class="admin-simple-list">${closureRows || '<div class="empty-state">No closures in the database yet.</div>'}</div>
         </section>
-
-        <div class="member-actions">
-          <a class="btn ghost" href="/members">Members area</a>
-          <form method="post" action="/auth/logout"><button class="btn ghost" type="submit">Sign out</button></form>
-        </div>
       </div>
     </section>`);
 }
@@ -530,6 +608,14 @@ function isEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value));
 }
 
+function formatShortDate(value) {
+  try {
+    return new Intl.DateTimeFormat("en-GB", {day:"2-digit", month:"short", year:"numeric", timeZone:"UTC"}).format(new Date(value + "T00:00:00Z"));
+  } catch {
+    return String(value || "");
+  }
+}
+
 function formatDateTime(value) {
   try {
     return new Intl.DateTimeFormat("en-GB", {dateStyle:"medium",timeStyle:"short",timeZone:"Europe/London"}).format(new Date(value));
@@ -647,7 +733,7 @@ async function saveCalendarEvent(request, env) {
       "INSERT INTO events (event_date, title, location, description, featured) VALUES (?, ?, ?, ?, ?)"
     ).bind(date, title, location || null, description || null, featured).run();
   }
-  return redirect("/admin");
+  return redirect("/admin/calendar");
 }
 
 async function saveCalendarClosure(request, env) {
@@ -668,7 +754,7 @@ async function saveCalendarClosure(request, env) {
       "INSERT INTO closures (closure_date, title, description) VALUES (?, ?, ?)"
     ).bind(date, title, description || null).run();
   }
-  return redirect("/admin");
+  return redirect("/admin/calendar");
 }
 
 async function deleteCalendarItem(request, env) {
@@ -684,7 +770,7 @@ async function deleteCalendarItem(request, env) {
   } else {
     await env.APP_DB.prepare("DELETE FROM closures WHERE id=?").bind(id).run();
   }
-  return redirect("/admin");
+  return redirect("/admin/calendar");
 }
 
 async function importExistingCalendar(request, env) {
@@ -715,7 +801,7 @@ async function importExistingCalendar(request, env) {
     ).bind(item.date, item.title || "Club closed", item.description || null));
   }
   if (statements.length) await env.APP_DB.batch(statements);
-  return redirect("/admin");
+  return redirect("/admin/calendar");
 }
 
 function sameOrigin(request) {
