@@ -56,10 +56,7 @@ export default {
 
       if (path === "/contact") {
         if (request.method === "POST") return handleContactPrototype(request);
-        if (request.method === "GET") {
-          const contactUrl = new URL("/contact.html", request.url);
-          return env.ASSETS.fetch(new Request(contactUrl, request));
-        }
+        if (request.method === "GET") return contactPage();
         return methodNotAllowed();
       }
 
@@ -128,6 +125,67 @@ export default {
   }
 };
 
+function contactPage() {
+  return htmlPage("Contact", `
+    <section class="page-hero">
+      <div class="container">
+        <div class="eyebrow">Get in touch</div>
+        <h1>Contact</h1>
+        <p class="lead">Questions about starting judo, class times or the club? Send us a message or give us a call.</p>
+      </div>
+    </section>
+    <section class="page-content">
+      <div class="container contact-layout">
+        <div class="contact-details">
+          <div class="eyebrow">Old Priory Judo Club</div>
+          <h2>We'd be happy to hear from you.</h2>
+          <p class="lead">New starters are welcome from age 5, and the club offers three free trial sessions.</p>
+          <div class="contact-card-stack">
+            <article class="page-card contact-info-card">
+              <span class="contact-icon">☎</span>
+              <div><small>Telephone</small><strong><a href="tel:07730365056">07730 365056</a></strong></div>
+            </article>
+            <article class="page-card contact-info-card">
+              <span class="contact-icon">🥋</span>
+              <div><small>Training</small><strong>Friday & Saturday</strong><span>See the current class times on the home page.</span></div>
+            </article>
+            <article class="page-card contact-info-card">
+              <span class="contact-icon">📍</span>
+              <div><small>Location</small><strong>York</strong><span>Contact the club for venue details and directions.</span></div>
+            </article>
+          </div>
+        </div>
+        <form class="page-card contact-form" method="post" action="/contact">
+          <div class="eyebrow">Send an enquiry</div>
+          <h2>Contact the club</h2>
+          <p>This prototype demonstrates the enquiry form. Messages are not yet delivered to a mailbox.</p>
+          <div class="form-pair">
+            <label>Your name<input type="text" name="name" autocomplete="name" maxlength="100" required></label>
+            <label>Email address<input type="email" name="email" autocomplete="email" maxlength="200" required></label>
+          </div>
+          <label>Telephone <span class="optional">(optional)</span><input type="tel" name="phone" autocomplete="tel" maxlength="40"></label>
+          <label>What can we help with?
+            <select name="subject" required>
+              <option value="">Choose an option</option>
+              <option>Free trial / new starter</option>
+              <option>Class information</option>
+              <option>Competition or grading</option>
+              <option>Existing member enquiry</option>
+              <option>General enquiry</option>
+            </select>
+          </label>
+          <label>Message<textarea name="message" rows="7" maxlength="3000" required></textarea></label>
+          <div class="contact-honeypot" aria-hidden="true">
+            <label>Leave this field empty<input type="text" name="website" tabindex="-1" autocomplete="off"></label>
+          </div>
+          <div class="anti-spam-note"><strong>Spam protection</strong><span>Cloudflare Turnstile will be enabled before the form goes live.</span></div>
+          <button class="btn red" type="submit">Send enquiry</button>
+          <small class="form-footnote">Prototype only — submitting this form does not send an email.</small>
+        </form>
+      </div>
+    </section>`);
+}
+
 async function handleContactPrototype(request) {
   if (!sameOrigin(request)) return forbidden();
   const form = await request.formData();
@@ -145,7 +203,7 @@ async function handleContactPrototype(request) {
           <div class="eyebrow">Contact</div>
           <h2>Check the form</h2>
           <p>Please provide your name, a valid email address, an enquiry type and a message.</p>
-          <a class="btn ghost" href="/contact.html">Back to contact form</a>
+          <a class="btn ghost" href="/contact">Back to contact form</a>
         </div>
       </div></section>`, 400);
   }
@@ -158,7 +216,7 @@ async function handleContactPrototype(request) {
         <p>The form has been accepted successfully. During the prototype phase no email is sent and the enquiry is not stored.</p>
         <p>Once outbound mail is configured, this same form will deliver enquiries to the club mailbox after spam verification.</p>
         <a class="btn red" href="/">Back to home</a>
-        <a class="btn ghost" href="/contact.html">Back to contact</a>
+        <a class="btn ghost" href="/contact">Back to contact</a>
       </div>
     </div></section>`);
 }
@@ -1022,7 +1080,7 @@ function htmlPage(title, content, status = 200) {
   <nav class="nav">
     <div class="container nav-inner">
       <a class="brand" href="/"><span class="mark"><img src="/assets/old-priory-logo.webp" alt="Old Priory Judo Club logo"></span><span>Old Priory Judo Club<small>York · Est. 1947</small></span></a>
-      <div class="links"><a class="nav-link" href="/">Home</a><a class="nav-link" href="/events.html">Events</a><a class="nav-link" href="/history.html">History</a><a class="nav-link" href="/instructors.html">Instructors</a><a class="nav-link" href="/contact.html">Contact</a><a class="btn ghost" href="/members">Members</a></div>
+      <div class="links"><a class="nav-link" href="/">Home</a><a class="nav-link" href="/events.html">Events</a><a class="nav-link" href="/history.html">History</a><a class="nav-link" href="/instructors.html">Instructors</a><a class="nav-link" href="/contact">Contact</a><a class="btn ghost" href="/members">Members</a></div>
     </div>
   </nav>
   <main>${content}</main>
