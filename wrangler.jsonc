@@ -19,6 +19,12 @@
       "database_id": "e76e7dbf-251f-4ec1-9d68-c4c82180212a"
     }
   ],
+  "r2_buckets": [
+    {
+      "binding": "Resources",
+      "bucket_name": "opjc-resources-prod"
+    }
+  ],
   "main": "src/worker.js",
   "vars": {
     "RESOURCE_FILE_LIMIT_BYTES": 20971520,
