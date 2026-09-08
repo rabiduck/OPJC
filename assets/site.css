@@ -256,3 +256,6 @@ a.admin-dashboard-card:hover{transform:translateY(-3px);box-shadow:0 16px 42px r
   .policy-layout{grid-template-columns:1fr}
   .policy-nav{position:static}
 }
+
+.foot-brand strong,.foot-brand small{display:block}
+.foot-brand small{margin-top:4px}
