@@ -286,6 +286,7 @@ async function handleSetup(request, env) {
           <div class="eyebrow">UAT diagnostic</div>
           <h2>Initial setup failed.</h2>
           <p>Failure stage: <strong>${escapeHtml(stage)}</strong></p>
+          <p>Error: <code>${escapeHtml(error?.name || "Error")}: ${escapeHtml(error?.message || String(error))}</code></p>
           <p>No secret or password values are shown.</p>
         </div>
       </div></section>`, 500);
