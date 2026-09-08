@@ -92,3 +92,20 @@ if(copyButton&&copyInput){
     }
   });
 }
+
+
+document.querySelectorAll('.load-map').forEach(button=>{
+  button.addEventListener('click',()=>{
+    const container=button.closest('.contact-map');
+    if(!container) return;
+    const src=button.dataset.mapSrc;
+    if(!src) return;
+    const iframe=document.createElement('iframe');
+    iframe.title='Map showing Old Priory Judo Club at 25 Mattison Way, Acomb, York';
+    iframe.src=src;
+    iframe.loading='lazy';
+    iframe.referrerPolicy='no-referrer-when-downgrade';
+    iframe.allowFullscreen=true;
+    container.replaceChildren(iframe);
+  });
+});
