@@ -110,6 +110,16 @@ export default {
         return request.method === "POST" ? revokeMemberSessions(request, env) : methodNotAllowed();
       }
 
+      if (path === "/admin/resources") {
+        return request.method === "GET" ? adminResourcesPage(request, env) : methodNotAllowed();
+      }
+      if (path === "/admin/resources/save") {
+        return request.method === "POST" ? saveResource(request, env) : methodNotAllowed();
+      }
+      if (path === "/admin/resources/delete") {
+        return request.method === "POST" ? deleteResource(request, env) : methodNotAllowed();
+      }
+
       return env.ASSETS.fetch(request);
     } catch (error) {
       console.error("OPJC worker error", error);
@@ -318,20 +328,53 @@ async function membersPage(request, env) {
   const user = await getCurrentUser(request, env);
   if (!user) return redirect("/members/login?next=/members");
 
+  const resources = await env.APP_DB.prepare(
+    "SELECT id,title,category,description,resource_type,url,file_name FROM resources WHERE active=1 ORDER BY category COLLATE NOCASE, sort_order, title COLLATE NOCASE"
+  ).all();
+
+  const rows = resources.results || [];
+  const categories = new Map();
+  for (const row of rows) {
+    const category = String(row.category || "Other");
+    if (!categories.has(category)) categories.set(category, []);
+    categories.get(category).push(row);
+  }
+
+  const resourceHtml = categories.size ? [...categories.entries()].map(([category, items]) => `
+    <section class="member-resource-section">
+      <div class="eyebrow">${escapeHtml(category)}</div>
+      <div class="member-resource-list">
+        ${items.map(item => {
+          const description = item.description ? `<p>${escapeHtml(item.description)}</p>` : "";
+          if (item.resource_type === "link" && item.url) {
+            return `<article class="page-card member-resource-card">
+              <div><h3>${escapeHtml(item.title)}</h3>${description}</div>
+              <a class="btn ghost" href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">Open resource</a>
+            </article>`;
+          }
+          return `<article class="page-card member-resource-card">
+            <div><h3>${escapeHtml(item.title)}</h3>${description}<small>${escapeHtml(item.file_name || "File resource")}</small></div>
+            <span class="status-badge pending">File coming soon</span>
+          </article>`;
+        }).join("")}
+      </div>
+    </section>`
+  ).join("") : '<div class="empty-state">No member resources have been published yet.</div>';
+
   return htmlPage("Members", `
     <section class="page-hero">
       <div class="container">
         <div class="eyebrow">Members area</div>
         <h1>Welcome, ${escapeHtml(user.display_name)}</h1>
-        <p class="lead">Member resources will live here.</p>
+        <p class="lead">Club resources, grading material and useful links.</p>
       </div>
     </section>
     <section class="page-content">
       <div class="container">
-        <div class="placeholder-grid">
-          <article class="page-card"><h3>Grading resources</h3><p>Syllabuses and grading material will be added here.</p></article>
-          <article class="page-card"><h3>Club resources</h3><p>Member-only documents and useful downloads will appear here.</p></article>
-          <article class="page-card"><h3>Your account</h3><p>${escapeHtml(user.email)} · ${escapeHtml(user.role)}</p></article>
+        ${resourceHtml}
+        <div class="page-card member-account-card">
+          <div><div class="eyebrow">Your account</div><h3>${escapeHtml(user.display_name)}</h3><p>${escapeHtml(user.email)} · ${escapeHtml(user.role)}</p></div>
+          <a class="btn ghost" href="/members/account">Account settings</a>
         </div>
         <div class="member-actions">
           ${user.role === "admin" ? '<a class="btn ghost" href="/admin">Admin area</a>' : ""}
@@ -340,7 +383,6 @@ async function membersPage(request, env) {
       </div>
     </section>`);
 }
-
 async function adminPage(request, env) {
   const user = await getCurrentUser(request, env);
   if (!user) return redirect("/members/login?next=/admin");
@@ -357,11 +399,12 @@ async function adminPage(request, env) {
   }
 
   const now = new Date().toISOString().slice(0, 10);
-  const [eventCount, closureCount, memberCount, inviteCount] = await Promise.all([
+  const [eventCount, closureCount, memberCount, inviteCount, resourceCount] = await Promise.all([
     env.APP_DB.prepare("SELECT COUNT(*) AS count FROM events WHERE event_date >= ?").bind(now).first(),
     env.APP_DB.prepare("SELECT COUNT(*) AS count FROM closures WHERE closure_date >= ?").bind(now).first(),
     env.AUTH_DB.prepare("SELECT COUNT(*) AS count FROM users WHERE active=1").first(),
-    env.AUTH_DB.prepare("SELECT COUNT(*) AS count FROM account_tokens WHERE type='invite' AND used_at IS NULL AND expires_at > ?").bind(new Date().toISOString()).first()
+    env.AUTH_DB.prepare("SELECT COUNT(*) AS count FROM account_tokens WHERE type='invite' AND used_at IS NULL AND expires_at > ?").bind(new Date().toISOString()).first(),
+    env.APP_DB.prepare("SELECT COUNT(*) AS count FROM resources WHERE active=1").first()
   ]);
 
   return htmlPage("Admin", `
@@ -393,13 +436,14 @@ async function adminPage(request, env) {
             <span class="admin-card-link">Manage members →</span>
           </a>
 
-          <article class="admin-dashboard-card disabled-card">
+          <a class="admin-dashboard-card" href="/admin/resources">
             <div class="admin-card-icon">📚</div>
-            <div class="eyebrow">Coming later</div>
+            <div class="eyebrow">Members area</div>
             <h2>Resources</h2>
-            <p>Member-only syllabuses, club documents and useful downloads will be managed here.</p>
-            <div class="admin-card-stats">Not yet enabled</div>
-          </article>
+            <p>Manage member-only syllabuses, club documents, useful links and future downloads.</p>
+            <div class="admin-card-stats"><strong>${Number(resourceCount?.count || 0)}</strong> published resources</div>
+            <span class="admin-card-link">Manage resources →</span>
+          </a>
         </div>
 
         <div class="member-actions admin-dashboard-actions">
@@ -558,6 +602,99 @@ async function handleChangePassword(request, env) {
 
 function accountMessage(title, message, status) {
   return htmlPage(title, '<section class="page-content"><div class="container auth-wrap"><div class="page-card auth-card"><div class="eyebrow">Account</div><h2>' + escapeHtml(title) + '</h2><p>' + escapeHtml(message) + '</p><a class="btn ghost" href="/members/account">Back to account settings</a></div></div></section>', status || 200);
+}
+
+async function adminResourcesPage(request, env) {
+  const admin = await getCurrentUser(request, env);
+  if (!admin) return redirect("/members/login?next=/admin");
+  if (admin.role !== "admin") return forbidden();
+
+  const result = await env.APP_DB.prepare(
+    "SELECT id,title,category,description,resource_type,url,file_name,active,sort_order FROM resources ORDER BY category COLLATE NOCASE, sort_order, title COLLATE NOCASE"
+  ).all();
+
+  const rows = (result.results || []).map(row => `
+    <details class="admin-list-item">
+      <summary>
+        <div class="admin-list-main"><strong>${escapeHtml(row.title)}</strong><span>${escapeHtml(row.category)} · ${escapeHtml(row.resource_type)}</span></div>
+        <span class="status-badge ${Number(row.active) === 1 ? "active" : "inactive"}">${Number(row.active) === 1 ? "Published" : "Hidden"}</span>
+        <span class="admin-edit-label">Edit</span>
+      </summary>
+      <form class="admin-edit-form resource-edit-form" method="post" action="/admin/resources/save">
+        <input type="hidden" name="id" value="${escapeHtml(row.id)}">
+        <label>Title<input type="text" name="title" maxlength="200" value="${escapeHtml(row.title)}" required></label>
+        <label>Category<input type="text" name="category" maxlength="100" value="${escapeHtml(row.category)}" required></label>
+        <label>Type<select name="resource_type"><option value="link" ${row.resource_type === "link" ? "selected" : ""}>External link</option><option value="file" ${row.resource_type === "file" ? "selected" : ""}>File (placeholder)</option></select></label>
+        <label class="admin-form-wide">Description<textarea name="description" rows="3" maxlength="1000">${escapeHtml(row.description || "")}</textarea></label>
+        <label class="admin-form-wide">URL<input type="url" name="url" value="${escapeHtml(row.url || "")}" placeholder="https://..."></label>
+        <label>File name<input type="text" name="file_name" maxlength="255" value="${escapeHtml(row.file_name || "")}" placeholder="Optional until file storage is enabled"></label>
+        <label>Sort order<input type="number" name="sort_order" value="${escapeHtml(row.sort_order || 0)}"></label>
+        <label class="check-label"><input type="checkbox" name="active" value="1" ${Number(row.active) === 1 ? "checked" : ""}> Published</label>
+        <div class="admin-row-actions">
+          <button class="btn red" type="submit">Save</button>
+          <button class="btn danger" type="submit" formaction="/admin/resources/delete" name="id" value="${escapeHtml(row.id)}" onclick="return confirm('Delete this resource?')">Delete</button>
+        </div>
+      </form>
+    </details>`).join("");
+
+  return htmlPage("Resources", `
+    <section class="page-hero"><div class="container"><div class="eyebrow">Administration</div><h1>Resources</h1><p class="lead">Publish member-only links now, with file resources ready for protected storage later.</p></div></section>
+    <section class="page-content"><div class="container">
+      <div class="admin-heading"><div><div class="eyebrow">Member resources</div><h2>Manage resources</h2></div><a class="btn ghost" href="/admin">Back to admin</a></div>
+      <details class="admin-add-panel">
+        <summary class="btn red">Add resource</summary>
+        <form class="admin-edit-form add-form resource-edit-form" method="post" action="/admin/resources/save">
+          <label>Title<input type="text" name="title" maxlength="200" required></label>
+          <label>Category<input type="text" name="category" maxlength="100" placeholder="e.g. Grading" required></label>
+          <label>Type<select name="resource_type"><option value="link" selected>External link</option><option value="file">File (placeholder)</option></select></label>
+          <label class="admin-form-wide">Description<textarea name="description" rows="3" maxlength="1000"></textarea></label>
+          <label class="admin-form-wide">URL<input type="url" name="url" placeholder="https://..."></label>
+          <label>File name<input type="text" name="file_name" maxlength="255" placeholder="Optional until file storage is enabled"></label>
+          <label>Sort order<input type="number" name="sort_order" value="0"></label>
+          <label class="check-label"><input type="checkbox" name="active" value="1" checked> Published</label>
+          <div class="admin-row-actions"><button class="btn red" type="submit">Add resource</button></div>
+        </form>
+      </details>
+      <div class="admin-simple-list">${rows || '<div class="empty-state">No resources yet.</div>'}</div>
+    </div></section>`);
+}
+
+async function saveResource(request, env) {
+  if (!(await requireAdmin(request, env))) return forbidden();
+  const form = await request.formData();
+  const id = positiveInt(form.get("id"));
+  const title = String(form.get("title") || "").trim();
+  const category = String(form.get("category") || "").trim();
+  const description = String(form.get("description") || "").trim();
+  const resourceType = String(form.get("resource_type") || "link");
+  const url = String(form.get("url") || "").trim();
+  const fileName = String(form.get("file_name") || "").trim();
+  const active = form.get("active") === "1" ? 1 : 0;
+  const sortOrderRaw = Number(form.get("sort_order") || 0);
+  const sortOrder = Number.isFinite(sortOrderRaw) ? Math.trunc(sortOrderRaw) : 0;
+
+  if (!title || !category || !["link","file"].includes(resourceType)) return badRequest("Title, category and a valid resource type are required.");
+  if (resourceType === "link" && !/^https?:\/\//i.test(url)) return badRequest("External links must use an http or https URL.");
+
+  if (id) {
+    await env.APP_DB.prepare(
+      "UPDATE resources SET title=?,category=?,description=?,resource_type=?,url=?,file_name=?,active=?,sort_order=?,updated_at=CURRENT_TIMESTAMP WHERE id=?"
+    ).bind(title, category, description || null, resourceType, url || null, fileName || null, active, sortOrder, id).run();
+  } else {
+    await env.APP_DB.prepare(
+      "INSERT INTO resources (title,category,description,resource_type,url,file_name,active,sort_order) VALUES (?,?,?,?,?,?,?,?)"
+    ).bind(title, category, description || null, resourceType, url || null, fileName || null, active, sortOrder).run();
+  }
+  return redirect("/admin/resources");
+}
+
+async function deleteResource(request, env) {
+  if (!(await requireAdmin(request, env))) return forbidden();
+  const form = await request.formData();
+  const id = positiveInt(form.get("id"));
+  if (!id) return badRequest("Invalid resource.");
+  await env.APP_DB.prepare("DELETE FROM resources WHERE id=?").bind(id).run();
+  return redirect("/admin/resources");
 }
 
 async function adminMembersPage(request, env) {
