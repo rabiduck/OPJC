@@ -288,10 +288,10 @@ async function handleLogin(request, env) {
   const next = safeNext(String(form.get("next") || "/members"));
 
   const user = await env.AUTH_DB.prepare(
-    "SELECT id, email, display_name, password_hash, role, active FROM users WHERE email = ? COLLATE NOCASE LIMIT 1"
+    "SELECT id, email, display_name, password_hash, role, active, account_scope FROM users WHERE email = ? COLLATE NOCASE LIMIT 1"
   ).bind(email).first();
 
-  if (!user || user.active !== 1 || !(await verifyPassword(password, user.password_hash))) {
+  if (!user || user.active !== 1 || !accountScopeVisible(env, user.account_scope) || !(await verifyPassword(password, user.password_hash))) {
     return htmlPage("Member login", `
       <section class="page-content"><div class="container auth-wrap">
         <div class="page-card auth-card">
@@ -434,11 +434,12 @@ async function adminPage(request, env) {
   }
 
   const now = new Date().toISOString().slice(0, 10);
+  const authEnvironment = isUatEnvironment(env) ? "uat" : "production";
   const [eventCount, closureCount, memberCount, inviteCount, resourceCount] = await Promise.all([
     env.APP_DB.prepare("SELECT COUNT(*) AS count FROM events WHERE event_date >= ?").bind(now).first(),
     env.APP_DB.prepare("SELECT COUNT(*) AS count FROM closures WHERE closure_date >= ?").bind(now).first(),
-    env.AUTH_DB.prepare("SELECT COUNT(*) AS count FROM users WHERE active=1").first(),
-    env.AUTH_DB.prepare("SELECT COUNT(*) AS count FROM account_tokens WHERE type='invite' AND used_at IS NULL AND expires_at > ?").bind(new Date().toISOString()).first(),
+    env.AUTH_DB.prepare("SELECT COUNT(*) AS count FROM users WHERE active=1 AND (?='uat' OR account_scope='production')").bind(authEnvironment).first(),
+    env.AUTH_DB.prepare("SELECT COUNT(*) AS count FROM account_tokens WHERE type='invite' AND used_at IS NULL AND expires_at > ? AND (?='uat' OR account_scope='production')").bind(new Date().toISOString(), authEnvironment).first(),
     env.APP_DB.prepare("SELECT COUNT(*) AS count FROM resources WHERE active=1").first()
   ]);
 
@@ -901,32 +902,43 @@ async function adminMembersPage(request, env) {
   const admin = await getCurrentUser(request, env);
   if (!admin) return redirect("/members/login?next=/admin");
   if (admin.role !== "admin") return forbidden();
-  const users = await env.AUTH_DB.prepare("SELECT id,email,display_name,role,active,created_at FROM users ORDER BY display_name COLLATE NOCASE,email").all();
-  const invites = await env.AUTH_DB.prepare("SELECT id,email,display_name,role,expires_at FROM account_tokens WHERE type='invite' AND used_at IS NULL AND expires_at>? ORDER BY created_at DESC").bind(new Date().toISOString()).all();
+
+  const authEnvironment = isUatEnvironment(env) ? "uat" : "production";
+  const users = await env.AUTH_DB.prepare(
+    "SELECT id,email,display_name,role,account_scope,active,created_at FROM users WHERE (?='uat' OR account_scope='production') ORDER BY display_name COLLATE NOCASE,email"
+  ).bind(authEnvironment).all();
+  const invites = await env.AUTH_DB.prepare(
+    "SELECT id,email,display_name,role,account_scope,expires_at FROM account_tokens WHERE type='invite' AND used_at IS NULL AND expires_at>? AND (?='uat' OR account_scope='production') ORDER BY created_at DESC"
+  ).bind(new Date().toISOString(), authEnvironment).all();
 
   const userRows = (users.results || []).map(function(row) {
     const status = Number(row.active) === 1 ? "Active" : "Disabled";
+    const scopeBadge = row.account_scope === "uat_only" ? '<span class="status-badge pending">UAT only</span>' : "";
     const toggle = Number(row.id) === Number(admin.id) ? "" :
       '<form method="post" action="/admin/members/status"><input type="hidden" name="user_id" value="' + escapeHtml(row.id) + '"><input type="hidden" name="active" value="' + (Number(row.active) === 1 ? "0" : "1") + '"><button class="btn ' + (Number(row.active) === 1 ? "danger" : "ghost") + '" type="submit">' + (Number(row.active) === 1 ? "Disable" : "Enable") + '</button></form>';
     return '<article class="member-admin-row"><div><strong>' + escapeHtml(row.display_name) + '</strong><span>' + escapeHtml(row.email) + '</span></div>' +
-      '<div class="member-badges"><span class="status-badge">' + escapeHtml(row.role) + '</span><span class="status-badge ' + status.toLowerCase() + '">' + status + '</span></div>' +
+      '<div class="member-badges"><span class="status-badge">' + escapeHtml(row.role) + '</span>' + scopeBadge + '<span class="status-badge ' + status.toLowerCase() + '">' + status + '</span></div>' +
       '<div class="member-admin-actions"><form method="post" action="/admin/members/reset"><input type="hidden" name="user_id" value="' + escapeHtml(row.id) + '"><button class="btn ghost" type="submit">Reset link</button></form>' +
       '<form method="post" action="/admin/members/revoke"><input type="hidden" name="user_id" value="' + escapeHtml(row.id) + '"><button class="btn ghost" type="submit">Revoke sessions</button></form>' + toggle + '</div></article>';
   }).join("");
 
   const inviteRows = (invites.results || []).map(function(row) {
+    const scopeBadge = row.account_scope === "uat_only" ? '<span class="status-badge pending">UAT only</span>' : "";
     return '<article class="member-admin-row pending"><div><strong>' + escapeHtml(row.display_name || "Pending member") + '</strong><span>' + escapeHtml(row.email || "") + '</span></div>' +
-      '<div class="member-badges"><span class="status-badge pending">Invited</span></div><div class="member-admin-meta">Expires ' + escapeHtml(formatDateTime(row.expires_at)) + '</div></article>';
+      '<div class="member-badges"><span class="status-badge pending">Invited</span>' + scopeBadge + '</div><div class="member-admin-meta">Expires ' + escapeHtml(formatDateTime(row.expires_at)) + '</div></article>';
   }).join("");
+
+  const scopeNote = isUatEnvironment(env)
+    ? '<p class="auth-note">Invitations created in UAT are UAT-only. Production accounts remain available here for testing.</p>'
+    : "";
 
   return htmlPage("Member access",
     '<section class="page-hero"><div class="container"><div class="eyebrow">Administration</div><h1>Member access</h1><p class="lead">Invite members, manage access and issue password-reset links.</p></div></section>' +
     '<section class="page-content"><div class="container"><div class="admin-heading"><div><div class="eyebrow">Invite only</div><h2>Invite a member</h2></div><a class="btn ghost" href="/admin">Back to admin</a></div>' +
-    '<form class="page-card member-invite-form" method="post" action="/admin/members/invite"><label>Name<input type="text" name="display_name" required></label><label>Email address<input type="email" name="email" required></label><label>Role<select name="role"><option value="member" selected>Member</option><option value="admin">Administrator</option></select></label><div><button class="btn red" type="submit">Create invite</button></div></form>' +
+    '<form class="page-card member-invite-form" method="post" action="/admin/members/invite"><label>Name<input type="text" name="display_name" required></label><label>Email address<input type="email" name="email" required></label><label>Role<select name="role"><option value="member" selected>Member</option><option value="admin">Administrator</option></select></label><div><button class="btn red" type="submit">Create invite</button></div>' + scopeNote + '</form>' +
     '<section class="admin-calendar-section"><h3>Members</h3><div class="member-admin-list">' + (userRows || '<div class="empty-state">No member accounts yet.</div>') + '</div></section>' +
     '<section class="admin-calendar-section"><h3>Pending invitations</h3><div class="member-admin-list">' + (inviteRows || '<div class="empty-state">No pending invitations.</div>') + '</div></section></div></section>');
 }
-
 async function createMemberInvite(request, env) {
   const admin = await requireAdmin(request, env);
   if (!admin) return forbidden();
@@ -935,17 +947,27 @@ async function createMemberInvite(request, env) {
   const email = String(form.get("email") || "").trim();
   const role = String(form.get("role") || "member");
   if (!displayName || !isEmail(email) || !["member","admin"].includes(role)) return badRequest("A valid name, email address and role are required.");
+
   const existing = await env.AUTH_DB.prepare("SELECT id FROM users WHERE email=? COLLATE NOCASE LIMIT 1").bind(email).first();
   if (existing) return badRequest("An account already exists for that email address.");
-  await env.AUTH_DB.prepare("UPDATE account_tokens SET used_at=CURRENT_TIMESTAMP WHERE type='invite' AND email=? COLLATE NOCASE AND used_at IS NULL").bind(email).run();
+
+  const accountScope = accountScopeForNewInvite(env);
+  await env.AUTH_DB.prepare(
+    "UPDATE account_tokens SET used_at=CURRENT_TIMESTAMP WHERE type='invite' AND email=? COLLATE NOCASE AND account_scope=? AND used_at IS NULL"
+  ).bind(email, accountScope).run();
+
   const token = randomToken(32);
   const tokenHash = await sha256Hex(token);
   const expires = new Date(Date.now() + INVITE_DAYS * 86400000).toISOString();
-  await env.AUTH_DB.prepare("INSERT INTO account_tokens (id,token_hash,type,email,display_name,role,created_by,expires_at) VALUES (?,?,'invite',?,?,?,?,?)").bind(crypto.randomUUID(), tokenHash, email, displayName, role, admin.id, expires).run();
-  const link = new URL("/join", request.url); link.searchParams.set("token", token);
-  return linkPage("Member invitation created", "Send this single-use invitation link to the member. It expires in 7 days.", link.toString(), "/admin/members");
-}
+  await env.AUTH_DB.prepare(
+    "INSERT INTO account_tokens (id,token_hash,type,email,display_name,role,account_scope,created_by,expires_at) VALUES (?,?,'invite',?,?,?,?,?,?)"
+  ).bind(crypto.randomUUID(), tokenHash, email, displayName, role, accountScope, admin.id, expires).run();
 
+  const link = new URL("/join", request.url);
+  link.searchParams.set("token", token);
+  const scopeMessage = accountScope === "uat_only" ? " This account will be available on UAT only." : "";
+  return linkPage("Member invitation created", "Send this single-use invitation link to the member. It expires in 7 days." + scopeMessage, link.toString(), "/admin/members");
+}
 async function joinPage(request, env) {
   const token = new URL(request.url).searchParams.get("token") || "";
   const invite = await lookupAccountToken(env, token, "invite");
@@ -969,7 +991,7 @@ async function handleJoin(request, env) {
   const existing = await env.AUTH_DB.prepare("SELECT id FROM users WHERE email=? COLLATE NOCASE LIMIT 1").bind(invite.email).first();
   if (existing) return tokenInvalidPage("Account not created", "An account already exists for this email address.");
   const passwordHash = await hashPassword(password);
-  await env.AUTH_DB.prepare("INSERT INTO users (email,display_name,password_hash,role,active) VALUES (?,?,?,?,1)").bind(invite.email, invite.display_name, passwordHash, invite.role || "member").run();
+  await env.AUTH_DB.prepare("INSERT INTO users (email,display_name,password_hash,role,account_scope,active) VALUES (?,?,?,?,?,1)").bind(invite.email, invite.display_name, passwordHash, invite.role || "member", invite.account_scope || "production").run();
   await env.AUTH_DB.prepare("UPDATE account_tokens SET used_at=CURRENT_TIMESTAMP WHERE id=? AND used_at IS NULL").bind(invite.id).run();
   return htmlPage("Account created", '<section class="page-content"><div class="container auth-wrap"><div class="page-card auth-card"><div class="eyebrow">Members area</div><h2>Account created</h2><p>Your account is ready. You can now sign in.</p><a class="btn red" href="/members/login">Sign in</a></div></div></section>');
 }
@@ -980,17 +1002,27 @@ async function createPasswordReset(request, env) {
   const form = await request.formData();
   const userId = positiveInt(form.get("user_id"));
   if (!userId) return badRequest("Invalid user.");
-  const user = await env.AUTH_DB.prepare("SELECT id,email,display_name FROM users WHERE id=? LIMIT 1").bind(userId).first();
-  if (!user) return badRequest("User not found.");
-  await env.AUTH_DB.prepare("UPDATE account_tokens SET used_at=CURRENT_TIMESTAMP WHERE type='reset' AND user_id=? AND used_at IS NULL").bind(user.id).run();
+
+  const user = await env.AUTH_DB.prepare(
+    "SELECT id,email,display_name,account_scope FROM users WHERE id=? LIMIT 1"
+  ).bind(userId).first();
+  if (!user || !accountScopeVisible(env, user.account_scope)) return badRequest("User not found.");
+
+  await env.AUTH_DB.prepare(
+    "UPDATE account_tokens SET used_at=CURRENT_TIMESTAMP WHERE type='reset' AND user_id=? AND used_at IS NULL"
+  ).bind(user.id).run();
+
   const token = randomToken(32);
   const tokenHash = await sha256Hex(token);
   const expires = new Date(Date.now() + RESET_MINUTES * 60000).toISOString();
-  await env.AUTH_DB.prepare("INSERT INTO account_tokens (id,token_hash,type,email,display_name,user_id,created_by,expires_at) VALUES (?,?,'reset',?,?,?,?,?)").bind(crypto.randomUUID(), tokenHash, user.email, user.display_name, user.id, admin.id, expires).run();
-  const link = new URL("/reset-password", request.url); link.searchParams.set("token", token);
+  await env.AUTH_DB.prepare(
+    "INSERT INTO account_tokens (id,token_hash,type,email,display_name,user_id,account_scope,created_by,expires_at) VALUES (?,?,'reset',?,?,?,?,?,?)"
+  ).bind(crypto.randomUUID(), tokenHash, user.email, user.display_name, user.id, user.account_scope || "production", admin.id, expires).run();
+
+  const link = new URL("/reset-password", request.url);
+  link.searchParams.set("token", token);
   return linkPage("Password reset link created", "Send this single-use link to the member. It expires in 60 minutes.", link.toString(), "/admin/members");
 }
-
 async function passwordResetPage(request, env) {
   const token = new URL(request.url).searchParams.get("token") || "";
   const reset = await lookupAccountToken(env, token, "reset");
@@ -1023,29 +1055,40 @@ async function changeMemberStatus(request, env) {
   const userId = positiveInt(form.get("user_id"));
   const active = String(form.get("active")) === "1" ? 1 : 0;
   if (!userId || Number(userId) === Number(admin.id)) return badRequest("You cannot disable your own account.");
+
+  const target = await env.AUTH_DB.prepare("SELECT id,account_scope FROM users WHERE id=? LIMIT 1").bind(userId).first();
+  if (!target || !accountScopeVisible(env, target.account_scope)) return badRequest("User not found.");
+
   await env.AUTH_DB.batch([
     env.AUTH_DB.prepare("UPDATE users SET active=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(active, userId),
     env.AUTH_DB.prepare("UPDATE sessions SET revoked_at=CURRENT_TIMESTAMP WHERE user_id=? AND revoked_at IS NULL").bind(userId)
   ]);
   return redirect("/admin/members");
 }
-
 async function revokeMemberSessions(request, env) {
   const admin = await requireAdmin(request, env);
   if (!admin) return forbidden();
   const form = await request.formData();
   const userId = positiveInt(form.get("user_id"));
   if (!userId) return badRequest("Invalid user.");
-  await env.AUTH_DB.prepare("UPDATE sessions SET revoked_at=CURRENT_TIMESTAMP WHERE user_id=? AND revoked_at IS NULL").bind(userId).run();
+
+  const target = await env.AUTH_DB.prepare("SELECT id,account_scope FROM users WHERE id=? LIMIT 1").bind(userId).first();
+  if (!target || !accountScopeVisible(env, target.account_scope)) return badRequest("User not found.");
+
+  await env.AUTH_DB.prepare(
+    "UPDATE sessions SET revoked_at=CURRENT_TIMESTAMP WHERE user_id=? AND revoked_at IS NULL"
+  ).bind(userId).run();
   return redirect("/admin/members");
 }
-
 async function lookupAccountToken(env, token, type) {
   if (!token) return null;
   const hash = await sha256Hex(token);
-  return env.AUTH_DB.prepare("SELECT id,type,email,display_name,user_id,role,expires_at FROM account_tokens WHERE token_hash=? AND type=? AND used_at IS NULL AND expires_at>? LIMIT 1").bind(hash, type, new Date().toISOString()).first();
+  const row = await env.AUTH_DB.prepare(
+    "SELECT id,type,email,display_name,user_id,role,account_scope,expires_at FROM account_tokens WHERE token_hash=? AND type=? AND used_at IS NULL AND expires_at>? LIMIT 1"
+  ).bind(hash, type, new Date().toISOString()).first();
+  if (!row || !accountScopeVisible(env, row.account_scope)) return null;
+  return row;
 }
-
 function tokenInvalidPage(title, message) {
   return htmlPage(title, '<section class="page-content"><div class="container auth-wrap"><div class="page-card auth-card"><div class="eyebrow">Members area</div><h2>' + escapeHtml(title) + '</h2><p>' + escapeHtml(message) + '</p><a class="btn ghost" href="/">Back to home</a></div></div></section>', 400);
 }
@@ -1280,13 +1323,25 @@ function badRequest(message) {
   return new Response(String(message), { status: 400 });
 }
 
+function isUatEnvironment(env) {
+  return String(env.AUTH_ENVIRONMENT || "production").toLowerCase() === "uat";
+}
+
+function accountScopeForNewInvite(env) {
+  return isUatEnvironment(env) ? "uat_only" : "production";
+}
+
+function accountScopeVisible(env, scope) {
+  return isUatEnvironment(env) || String(scope || "production") === "production";
+}
+
 async function getCurrentUser(request, env) {
   const token = getCookie(request, SESSION_COOKIE);
   if (!token) return null;
 
   const tokenHash = await sha256Hex(token);
   const row = await env.AUTH_DB.prepare(`
-    SELECT u.id, u.email, u.display_name, u.role, u.active
+    SELECT u.id, u.email, u.display_name, u.role, u.active, u.account_scope
     FROM sessions s
     JOIN users u ON u.id = s.user_id
     WHERE s.token_hash = ?
@@ -1296,7 +1351,7 @@ async function getCurrentUser(request, env) {
     LIMIT 1
   `).bind(tokenHash, new Date().toISOString()).first();
 
-  if (!row) return null;
+  if (!row || !accountScopeVisible(env, row.account_scope)) return null;
 
   await env.AUTH_DB.prepare(
     "UPDATE sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE token_hash = ?"
