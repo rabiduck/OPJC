@@ -1,0 +1,13 @@
+.git
+.git/**
+.wrangler
+.wrangler/**
+.github
+.github/**
+src
+src/**
+schema
+schema/**
+README.md
+wrangler.jsonc
+wrangler.uat.jsonc
