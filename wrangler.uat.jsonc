@@ -20,6 +20,10 @@
     }
   ],
   "main": "src/worker.js",
+  "vars": {
+    "RESOURCE_FILE_LIMIT_BYTES": 20971520,
+    "RESOURCE_STORAGE_LIMIT_BYTES": 524288000
+  },
   "keep_vars": true,
   "secrets_store_secrets": [
     {
