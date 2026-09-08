@@ -28,5 +28,12 @@
     }
   ],
   "main": "src/worker.js",
-  "keep_vars": true
+  "keep_vars": true,
+  "secrets_store_secrets": [
+    {
+      "binding": "BOOTSTRAP_TOKEN",
+      "store_id": "039b10a326f040ae9c5412575c07b048",
+      "secret_name": "BOOTSTRAP_TOKEN"
+    }
+  ]
 }
