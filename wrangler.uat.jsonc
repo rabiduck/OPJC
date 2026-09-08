@@ -16,7 +16,7 @@
     {
       "binding": "APP_DB",
       "database_name": "opjc-uat",
-      "database_id": "c22ef52d-5efe-44ca-94ca-ccba15139147"
+      "database_id": "282c0590-905e-4261-a1b7-690ebe5e79b1"
     }
   ],
   "main": "src/worker.js",
