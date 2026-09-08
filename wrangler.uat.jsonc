@@ -15,8 +15,8 @@
     },
     {
       "binding": "APP_DB",
-      "database_name": "opjc-prod",
-      "database_id": "e76e7dbf-251f-4ec1-9d68-c4c82180212a"
+      "database_name": "opjc-uat",
+      "database_id": "282c0590-905e-4261-a1b7-690ebe5e79b1"
     }
   ],
   "main": "src/worker.js",
