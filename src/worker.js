@@ -153,6 +153,10 @@ function contactPage() {
               <span class="contact-icon">📍</span>
               <div><small>Location</small><strong>25 Mattison Way, Acomb, York YO24 4PD</strong><span>Old Priory Judo Club dojo.</span></div>
             </article>
+            <article class="page-card contact-info-card">
+              <span class="contact-icon">f</span>
+              <div><small>Facebook</small><strong><a href="https://www.facebook.com/OldPrioryJudoClub" target="_blank" rel="noopener noreferrer">Old Priory Judo Club</a></strong><span>Follow the club for news, photos and updates.</span></div>
+            </article>
             <div class="contact-map">
               <iframe
                 title="Map showing Old Priory Judo Club at 25 Mattison Way, Acomb, York"
