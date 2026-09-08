@@ -4,14 +4,6 @@
   "compatibility_date": "2026-09-05",
   "assets": {
     "directory": ".",
-    "exclude": [
-      ".git/**",
-      ".github/**",
-      "README.md",
-      "wrangler*.jsonc",
-      "schema/**",
-      "src/**"
-    ],
     "binding": "ASSETS",
     "run_worker_first": true
   },
