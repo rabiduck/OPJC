@@ -1,6 +1,6 @@
 const SESSION_COOKIE = "opjc_session";
 const SESSION_DAYS = 14;
-const PBKDF2_ITERATIONS = 250000;
+const PBKDF2_ITERATIONS = 100000;
 
 export default {
   async fetch(request, env) {
