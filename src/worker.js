@@ -331,6 +331,18 @@ async function handleLogout(request, env) {
   });
 }
 
+function memberToolbar(user, active) {
+  return `
+    <div class="member-toolbar" aria-label="Members area navigation">
+      <div class="member-toolbar-links">
+        <a class="${active === "home" ? "active" : ""}" href="/members">Member home</a>
+        <a class="${active === "account" ? "active" : ""}" href="/members/account">Account settings</a>
+        ${user.role === "admin" ? '<a href="/admin">Admin area</a>' : ""}
+      </div>
+      <form method="post" action="/auth/logout"><button type="submit">Sign out</button></form>
+    </div>`;
+}
+
 async function membersPage(request, env) {
   const user = await getCurrentUser(request, env);
   if (!user) return redirect("/members/login?next=/members");
@@ -349,8 +361,10 @@ async function membersPage(request, env) {
 
   const categoryCards = categories.size ? [...categories.entries()].map(([category, items]) => `
     <article class="page-card member-category-card">
-      <div class="eyebrow">Resources</div>
-      <h3>${escapeHtml(category)}</h3>
+      <div class="member-card-heading">
+        <div><div class="eyebrow">Resources</div><h3>${escapeHtml(category)}</h3></div>
+        <span class="member-count-badge">${items.length}</span>
+      </div>
       <div class="member-card-items">
         ${items.map(item => {
           const description = item.description ? `<span>${escapeHtml(item.description)}</span>` : "";
@@ -358,46 +372,48 @@ async function membersPage(request, env) {
             return `<a class="member-card-item" href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">
               <strong>${escapeHtml(item.title)}</strong>
               ${description}
-              <small>Open resource →</small>
+              <small>External link →</small>
             </a>`;
           }
           return `<a class="member-card-item" href="/members/resource/${escapeHtml(item.id)}/download">
             <strong>${escapeHtml(item.title)}</strong>
             ${description}
-            <small>Download ${escapeHtml(item.file_name || "file")} →</small>
+            <small>Download${item.file_name ? " · " + escapeHtml(item.file_name) : ""} →</small>
           </a>`;
         }).join("")}
       </div>
     </article>`
   ).join("") : `
-    <article class="page-card member-category-card">
+    <article class="page-card member-category-card member-empty-card">
       <div class="eyebrow">Resources</div>
       <h3>Club resources</h3>
       <p>No member resources have been published yet.</p>
     </article>`;
 
   return htmlPage("Members", `
-    <section class="page-hero">
+    <section class="page-hero member-hero">
       <div class="container">
         <div class="eyebrow">Members area</div>
         <h1>Welcome, ${escapeHtml(user.display_name)}</h1>
         <p class="lead">Club resources, grading material and useful links.</p>
       </div>
     </section>
-    <section class="page-content">
+    <section class="page-content member-page-content">
       <div class="container">
+        ${memberToolbar(user, "home")}
+        <div class="member-section-heading">
+          <div><div class="eyebrow">Member library</div><h2>Resources</h2></div>
+          <p>${rows.length} published resource${rows.length === 1 ? "" : "s"} across ${categories.size} categor${categories.size === 1 ? "y" : "ies"}.</p>
+        </div>
         <div class="member-resource-grid">
           ${categoryCards}
           <article class="page-card member-category-card member-account-card">
             <div class="eyebrow">Your account</div>
             <h3>${escapeHtml(user.display_name)}</h3>
-            <p>${escapeHtml(user.email)} · ${escapeHtml(user.role)}</p>
+            <p>${escapeHtml(user.email)}</p>
+            <span class="status-badge">${escapeHtml(user.role)}</span>
             <a class="btn ghost" href="/members/account">Account settings</a>
           </article>
-        </div>
-        <div class="member-actions">
-          ${user.role === "admin" ? '<a class="btn ghost" href="/admin">Admin area</a>' : ""}
-          <form method="post" action="/auth/logout"><button class="btn ghost" type="submit">Sign out</button></form>
         </div>
       </div>
     </section>`);
@@ -590,16 +606,40 @@ async function adminCalendarPage(request, env) {
 
 async function accountPage(request, env) {
   const user = await getCurrentUser(request, env);
-  if (!user) return redirect("/members/login?next=/members");
-  return htmlPage("Account settings",
-    '<section class="page-hero"><div class="container"><div class="eyebrow">Members area</div><h1>Account settings</h1><p class="lead">Signed in as ' + escapeHtml(user.email) + '.</p></div></section>' +
-    '<section class="page-content"><div class="container auth-wrap"><form class="page-card auth-card" method="post" action="/members/account">' +
-    '<h2>Change password</h2><label>Current password<input type="password" name="current_password" autocomplete="current-password" required></label>' +
-    '<label>New password<input type="password" name="new_password" autocomplete="new-password" minlength="12" required></label>' +
-    '<label>Confirm new password<input type="password" name="confirm_password" autocomplete="new-password" minlength="12" required></label>' +
-    '<button class="btn red" type="submit">Change password</button></form><div class="member-actions"><a class="btn ghost" href="/members">Back to members</a></div></div></section>');
-}
+  if (!user) return redirect("/members/login?next=/members/account");
 
+  return htmlPage("Account settings", `
+    <section class="page-hero member-hero">
+      <div class="container">
+        <div class="eyebrow">Members area</div>
+        <h1>Account settings</h1>
+        <p class="lead">Manage your member sign-in details.</p>
+      </div>
+    </section>
+    <section class="page-content member-page-content">
+      <div class="container">
+        ${memberToolbar(user, "account")}
+        <div class="member-account-layout">
+          <aside class="page-card account-summary-card">
+            <div class="eyebrow">Signed in as</div>
+            <h2>${escapeHtml(user.display_name)}</h2>
+            <p>${escapeHtml(user.email)}</p>
+            <span class="status-badge">${escapeHtml(user.role)}</span>
+            <small>Changing your password signs you out of all active sessions.</small>
+          </aside>
+          <form class="page-card auth-card member-password-card" method="post" action="/members/account">
+            <div class="eyebrow">Security</div>
+            <h2>Change password</h2>
+            <label>Current password<input type="password" name="current_password" autocomplete="current-password" required></label>
+            <label>New password<input type="password" name="new_password" autocomplete="new-password" minlength="12" required></label>
+            <label>Confirm new password<input type="password" name="confirm_password" autocomplete="new-password" minlength="12" required></label>
+            <small class="auth-note">Use at least 12 characters.</small>
+            <button class="btn red" type="submit">Change password</button>
+          </form>
+        </div>
+      </div>
+    </section>`);
+}
 async function handleChangePassword(request, env) {
   if (!sameOrigin(request)) return forbidden();
   const user = await getCurrentUser(request, env);
