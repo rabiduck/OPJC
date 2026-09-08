@@ -259,3 +259,8 @@ a.admin-dashboard-card:hover{transform:translateY(-3px);box-shadow:0 16px 42px r
 
 .foot-brand strong,.foot-brand small{display:block}
 .foot-brand small{margin-top:4px}
+
+.map-placeholder{min-height:250px;display:grid;place-items:center;align-content:center;gap:10px;padding:28px;text-align:center;background:var(--soft)}
+.map-placeholder strong{font-size:1.2rem}
+.map-placeholder span{max-width:460px;color:var(--muted)}
+.map-placeholder .btn{margin-top:6px}
