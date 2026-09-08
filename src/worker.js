@@ -430,7 +430,7 @@ function htmlPage(title, content, status = 200) {
     </div>
   </nav>
   <main>${content}</main>
-  <footer><div class="container foot"><strong>Old Priory Judo Club · York</strong><small>Affiliated with Bushido International / Za-Zen</small></div></footer>
+  <footer><div class="container foot"><strong>Old Priory Judo Club · York</strong><small>Affiliated with Bushido ZaZen International</small></div></footer>
   <script src="/assets/site.js"></script>
 </body>
 </html>`;
