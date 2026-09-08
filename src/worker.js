@@ -44,6 +44,13 @@ export default {
         return membersPage(request, env);
       }
 
+      const resourceDownloadMatch = path.match(/^\/members\/resource\/(\d+)\/download$/);
+      if (resourceDownloadMatch) {
+        return request.method === "GET"
+          ? downloadMemberResource(request, env, Number(resourceDownloadMatch[1]))
+          : methodNotAllowed();
+      }
+
       if (path === "/admin" || path === "/admin/") {
         return adminPage(request, env);
       }
@@ -354,11 +361,11 @@ async function membersPage(request, env) {
               <small>Open resource →</small>
             </a>`;
           }
-          return `<div class="member-card-item unavailable">
+          return `<a class="member-card-item" href="/members/resource/${escapeHtml(item.id)}/download">
             <strong>${escapeHtml(item.title)}</strong>
             ${description}
-            <small>${escapeHtml(item.file_name || "File resource")} · coming soon</small>
-          </div>`;
+            <small>Download ${escapeHtml(item.file_name || "file")} →</small>
+          </a>`;
         }).join("")}
       </div>
     </article>`
@@ -623,7 +630,7 @@ async function adminResourcesPage(request, env) {
 
   const [result, storage] = await Promise.all([
     env.APP_DB.prepare(
-      "SELECT id,title,category,description,resource_type,url,file_name,file_size,active,sort_order FROM resources ORDER BY category COLLATE NOCASE, sort_order, title COLLATE NOCASE"
+      "SELECT id,title,category,description,resource_type,url,file_key,file_name,mime_type,file_size,active,sort_order FROM resources ORDER BY category COLLATE NOCASE, sort_order, title COLLATE NOCASE"
     ).all(),
     env.APP_DB.prepare("SELECT COALESCE(SUM(file_size),0) AS bytes FROM resources WHERE resource_type='file'").first()
   ]);
@@ -632,21 +639,25 @@ async function adminResourcesPage(request, env) {
   const storageLimit = Number(env.RESOURCE_STORAGE_LIMIT_BYTES || 0);
   const fileLimit = Number(env.RESOURCE_FILE_LIMIT_BYTES || 0);
 
-  const rows = (result.results || []).map(row => `
+  const rows = (result.results || []).map(row => {
+    const existingFile = row.resource_type === "file" && row.file_key
+      ? `<div class="resource-current-file"><strong>Current file</strong><span>${escapeHtml(row.file_name || "Resource file")} · ${formatBytes(row.file_size || 0)}</span></div>`
+      : "";
+    return `
     <details class="admin-list-item">
       <summary>
-        <div class="admin-list-main"><strong>${escapeHtml(row.title)}</strong><span>${escapeHtml(row.category)} · ${escapeHtml(row.resource_type)}</span></div>
+        <div class="admin-list-main"><strong>${escapeHtml(row.title)}</strong><span>${escapeHtml(row.category)} · ${escapeHtml(row.resource_type)}${row.resource_type === "file" && row.file_size ? " · " + escapeHtml(formatBytes(row.file_size)) : ""}</span></div>
         <span class="status-badge ${Number(row.active) === 1 ? "active" : "inactive"}">${Number(row.active) === 1 ? "Published" : "Hidden"}</span>
         <span class="admin-edit-label">Edit</span>
       </summary>
-      <form class="admin-edit-form resource-edit-form" method="post" action="/admin/resources/save">
+      <form class="admin-edit-form resource-edit-form" method="post" action="/admin/resources/save" enctype="multipart/form-data">
         <input type="hidden" name="id" value="${escapeHtml(row.id)}">
         <label>Title<input type="text" name="title" maxlength="200" value="${escapeHtml(row.title)}" required></label>
         <label>Category<input type="text" name="category" maxlength="100" value="${escapeHtml(row.category)}" required></label>
-        <label>Type<select name="resource_type"><option value="link" ${row.resource_type === "link" ? "selected" : ""}>External link</option><option value="file" ${row.resource_type === "file" ? "selected" : ""}>File (placeholder)</option></select></label>
+        <label>Type<select name="resource_type"><option value="link" ${row.resource_type === "link" ? "selected" : ""}>External link</option><option value="file" ${row.resource_type === "file" ? "selected" : ""}>File</option></select></label>
         <label class="admin-form-wide">Description<textarea name="description" rows="3" maxlength="1000">${escapeHtml(row.description || "")}</textarea></label>
         <label class="admin-form-wide">URL<input type="url" name="url" value="${escapeHtml(row.url || "")}" placeholder="https://..."></label>
-        <label>File name<input type="text" name="file_name" maxlength="255" value="${escapeHtml(row.file_name || "")}" placeholder="Optional until file storage is enabled"></label>
+        <label class="admin-form-wide">File${existingFile}<input type="file" name="resource_file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.jpg,.jpeg,.png,.webp,.zip"><small>Leave empty to keep the current file. Maximum ${formatBytes(fileLimit)}.</small></label>
         <label>Sort order<input type="number" name="sort_order" value="${escapeHtml(row.sort_order || 0)}"></label>
         <label class="check-label"><input type="checkbox" name="active" value="1" ${Number(row.active) === 1 ? "checked" : ""}> Published</label>
         <div class="admin-row-actions">
@@ -654,10 +665,11 @@ async function adminResourcesPage(request, env) {
           <button class="btn danger" type="submit" formaction="/admin/resources/delete" name="id" value="${escapeHtml(row.id)}" onclick="return confirm('Delete this resource?')">Delete</button>
         </div>
       </form>
-    </details>`).join("");
+    </details>`;
+  }).join("");
 
   return htmlPage("Resources", `
-    <section class="page-hero"><div class="container"><div class="eyebrow">Administration</div><h1>Resources</h1><p class="lead">Publish member-only links now, with file resources ready for protected storage later.</p></div></section>
+    <section class="page-hero"><div class="container"><div class="eyebrow">Administration</div><h1>Resources</h1><p class="lead">Publish member-only links and protected club files.</p></div></section>
     <section class="page-content"><div class="container">
       <div class="admin-heading"><div><div class="eyebrow">Member resources</div><h2>Manage resources</h2></div><a class="btn ghost" href="/admin">Back to admin</a></div>
       <div class="page-card resource-storage-summary">
@@ -666,13 +678,13 @@ async function adminResourcesPage(request, env) {
       </div>
       <details class="admin-add-panel">
         <summary class="btn red">Add resource</summary>
-        <form class="admin-edit-form add-form resource-edit-form" method="post" action="/admin/resources/save">
+        <form class="admin-edit-form add-form resource-edit-form" method="post" action="/admin/resources/save" enctype="multipart/form-data">
           <label>Title<input type="text" name="title" maxlength="200" required></label>
           <label>Category<input type="text" name="category" maxlength="100" placeholder="e.g. Grading" required></label>
-          <label>Type<select name="resource_type"><option value="link" selected>External link</option><option value="file">File (placeholder)</option></select></label>
+          <label>Type<select name="resource_type"><option value="link" selected>External link</option><option value="file">File</option></select></label>
           <label class="admin-form-wide">Description<textarea name="description" rows="3" maxlength="1000"></textarea></label>
           <label class="admin-form-wide">URL<input type="url" name="url" placeholder="https://..."></label>
-          <label>File name<input type="text" name="file_name" maxlength="255" placeholder="Optional until file storage is enabled"></label>
+          <label class="admin-form-wide">File<input type="file" name="resource_file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.jpg,.jpeg,.png,.webp,.zip"><small>Required when creating a file resource. Maximum ${formatBytes(fileLimit)}.</small></label>
           <label>Sort order<input type="number" name="sort_order" value="0"></label>
           <label class="check-label"><input type="checkbox" name="active" value="1" checked> Published</label>
           <div class="admin-row-actions"><button class="btn red" type="submit">Add resource</button></div>
@@ -691,23 +703,92 @@ async function saveResource(request, env) {
   const description = String(form.get("description") || "").trim();
   const resourceType = String(form.get("resource_type") || "link");
   const url = String(form.get("url") || "").trim();
-  const fileName = String(form.get("file_name") || "").trim();
   const active = form.get("active") === "1" ? 1 : 0;
   const sortOrderRaw = Number(form.get("sort_order") || 0);
   const sortOrder = Number.isFinite(sortOrderRaw) ? Math.trunc(sortOrderRaw) : 0;
+  const upload = form.get("resource_file");
+  const hasUpload = upload && typeof upload === "object" && typeof upload.arrayBuffer === "function" && Number(upload.size || 0) > 0;
 
-  if (!title || !category || !["link","file"].includes(resourceType)) return badRequest("Title, category and a valid resource type are required.");
-  if (resourceType === "link" && !/^https?:\/\//i.test(url)) return badRequest("External links must use an http or https URL.");
-
-  if (id) {
-    await env.APP_DB.prepare(
-      "UPDATE resources SET title=?,category=?,description=?,resource_type=?,url=?,file_name=?,active=?,sort_order=?,updated_at=CURRENT_TIMESTAMP WHERE id=?"
-    ).bind(title, category, description || null, resourceType, url || null, fileName || null, active, sortOrder, id).run();
-  } else {
-    await env.APP_DB.prepare(
-      "INSERT INTO resources (title,category,description,resource_type,url,file_name,active,sort_order) VALUES (?,?,?,?,?,?,?,?)"
-    ).bind(title, category, description || null, resourceType, url || null, fileName || null, active, sortOrder).run();
+  if (!title || !category || !["link","file"].includes(resourceType)) {
+    return badRequest("Title, category and a valid resource type are required.");
   }
+  if (resourceType === "link" && !/^https?:\/\//i.test(url)) {
+    return badRequest("External links must use an http or https URL.");
+  }
+
+  const existing = id
+    ? await env.APP_DB.prepare("SELECT id,resource_type,file_key,file_name,mime_type,file_size FROM resources WHERE id=? LIMIT 1").bind(id).first()
+    : null;
+  if (id && !existing) return badRequest("Resource not found.");
+
+  let newKey = existing?.file_key || null;
+  let newFileName = existing?.file_name || null;
+  let newMimeType = existing?.mime_type || null;
+  let newFileSize = Number(existing?.file_size || 0);
+  let uploadedNewObject = false;
+
+  if (resourceType === "file") {
+    if (!hasUpload && !existing?.file_key) return badRequest("Choose a file to upload.");
+
+    if (hasUpload) {
+      const fileLimit = Number(env.RESOURCE_FILE_LIMIT_BYTES || 0);
+      const storageLimit = Number(env.RESOURCE_STORAGE_LIMIT_BYTES || 0);
+      const fileSize = Number(upload.size || 0);
+      if (!fileSize || fileSize > fileLimit) return badRequest("The selected file exceeds the permitted file size.");
+
+      const safeName = safeResourceFileName(upload.name);
+      const mimeType = String(upload.type || "").toLowerCase() || "application/octet-stream";
+      if (!allowedResourceFile(safeName, mimeType)) return badRequest("That file type is not permitted.");
+
+      const storage = await env.APP_DB.prepare(
+        "SELECT COALESCE(SUM(file_size),0) AS bytes FROM resources WHERE resource_type='file'"
+      ).first();
+      const currentTotal = Number(storage?.bytes || 0);
+      const replacingSize = existing?.resource_type === "file" ? Number(existing?.file_size || 0) : 0;
+      const projectedTotal = currentTotal - replacingSize + fileSize;
+      if (storageLimit > 0 && projectedTotal > storageLimit) {
+        return badRequest("Uploading this file would exceed the Resources storage quota.");
+      }
+
+      newKey = "resources/" + crypto.randomUUID() + resourceFileExtension(safeName);
+      newFileName = safeName;
+      newMimeType = mimeType;
+      newFileSize = fileSize;
+
+      await env.Resources.put(newKey, upload.stream(), {
+        httpMetadata: { contentType: mimeType },
+        customMetadata: { originalName: safeName }
+      });
+      uploadedNewObject = true;
+    }
+  } else {
+    newKey = null;
+    newFileName = null;
+    newMimeType = null;
+    newFileSize = 0;
+  }
+
+  try {
+    if (id) {
+      await env.APP_DB.prepare(
+        "UPDATE resources SET title=?,category=?,description=?,resource_type=?,url=?,file_key=?,file_name=?,mime_type=?,file_size=?,active=?,sort_order=?,updated_at=CURRENT_TIMESTAMP WHERE id=?"
+      ).bind(title, category, description || null, resourceType, resourceType === "link" ? url : null, newKey, newFileName, newMimeType, newFileSize, active, sortOrder, id).run();
+    } else {
+      await env.APP_DB.prepare(
+        "INSERT INTO resources (title,category,description,resource_type,url,file_key,file_name,mime_type,file_size,active,sort_order) VALUES (?,?,?,?,?,?,?,?,?,?,?)"
+      ).bind(title, category, description || null, resourceType, resourceType === "link" ? url : null, newKey, newFileName, newMimeType, newFileSize, active, sortOrder).run();
+    }
+  } catch (error) {
+    if (uploadedNewObject && newKey) {
+      try { await env.Resources.delete(newKey); } catch (_) {}
+    }
+    throw error;
+  }
+
+  if (existing?.file_key && existing.file_key !== newKey) {
+    try { await env.Resources.delete(existing.file_key); } catch (error) { console.error("Failed to delete replaced resource object", error); }
+  }
+
   return redirect("/admin/resources");
 }
 
@@ -716,8 +797,64 @@ async function deleteResource(request, env) {
   const form = await request.formData();
   const id = positiveInt(form.get("id"));
   if (!id) return badRequest("Invalid resource.");
+
+  const existing = await env.APP_DB.prepare("SELECT file_key FROM resources WHERE id=? LIMIT 1").bind(id).first();
   await env.APP_DB.prepare("DELETE FROM resources WHERE id=?").bind(id).run();
+
+  if (existing?.file_key) {
+    try { await env.Resources.delete(existing.file_key); } catch (error) { console.error("Failed to delete resource object", error); }
+  }
   return redirect("/admin/resources");
+}
+
+async function downloadMemberResource(request, env, id) {
+  const user = await getCurrentUser(request, env);
+  if (!user) return redirect("/members/login?next=" + encodeURIComponent("/members/resource/" + id + "/download"));
+
+  const resource = await env.APP_DB.prepare(
+    "SELECT file_key,file_name,mime_type FROM resources WHERE id=? AND active=1 AND resource_type='file' LIMIT 1"
+  ).bind(id).first();
+  if (!resource?.file_key) return new Response("Resource not found.", { status: 404 });
+
+  const object = await env.Resources.get(resource.file_key);
+  if (!object) return new Response("Resource file not found.", { status: 404 });
+
+  const fileName = safeResourceFileName(resource.file_name || "resource");
+  const headers = new Headers();
+  headers.set("Content-Type", resource.mime_type || object.httpMetadata?.contentType || "application/octet-stream");
+  headers.set("Content-Disposition", "attachment; filename*=UTF-8''" + encodeURIComponent(fileName));
+  headers.set("Cache-Control", "private, no-store");
+  headers.set("X-Content-Type-Options", "nosniff");
+  if (object.size != null) headers.set("Content-Length", String(object.size));
+  return new Response(object.body, { headers });
+}
+
+function safeResourceFileName(name) {
+  const cleaned = String(name || "resource")
+    .replace(/[\\/\0\r\n]/g, "_")
+    .replace(/[<>:"|?*]/g, "_")
+    .trim();
+  return (cleaned || "resource").slice(0, 180);
+}
+
+function resourceFileExtension(name) {
+  const match = String(name || "").toLowerCase().match(/(\.[a-z0-9]{1,8})$/);
+  return match ? match[1] : "";
+}
+
+function allowedResourceFile(name, mimeType) {
+  const ext = resourceFileExtension(name);
+  const allowedExtensions = new Set([
+    ".pdf",".doc",".docx",".xls",".xlsx",".ppt",".pptx",".txt",".csv",
+    ".jpg",".jpeg",".png",".webp",".zip"
+  ]);
+  if (!allowedExtensions.has(ext)) return false;
+
+  const blockedMime = new Set([
+    "text/html","application/javascript","text/javascript",
+    "application/x-msdownload","application/x-msdos-program"
+  ]);
+  return !blockedMime.has(String(mimeType || "").toLowerCase());
 }
 
 async function adminMembersPage(request, env) {
