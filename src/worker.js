@@ -621,9 +621,16 @@ async function adminResourcesPage(request, env) {
   if (!admin) return redirect("/members/login?next=/admin");
   if (admin.role !== "admin") return forbidden();
 
-  const result = await env.APP_DB.prepare(
-    "SELECT id,title,category,description,resource_type,url,file_name,active,sort_order FROM resources ORDER BY category COLLATE NOCASE, sort_order, title COLLATE NOCASE"
-  ).all();
+  const [result, storage] = await Promise.all([
+    env.APP_DB.prepare(
+      "SELECT id,title,category,description,resource_type,url,file_name,file_size,active,sort_order FROM resources ORDER BY category COLLATE NOCASE, sort_order, title COLLATE NOCASE"
+    ).all(),
+    env.APP_DB.prepare("SELECT COALESCE(SUM(file_size),0) AS bytes FROM resources WHERE resource_type='file'").first()
+  ]);
+
+  const usedBytes = Number(storage?.bytes || 0);
+  const storageLimit = Number(env.RESOURCE_STORAGE_LIMIT_BYTES || 0);
+  const fileLimit = Number(env.RESOURCE_FILE_LIMIT_BYTES || 0);
 
   const rows = (result.results || []).map(row => `
     <details class="admin-list-item">
@@ -653,6 +660,10 @@ async function adminResourcesPage(request, env) {
     <section class="page-hero"><div class="container"><div class="eyebrow">Administration</div><h1>Resources</h1><p class="lead">Publish member-only links now, with file resources ready for protected storage later.</p></div></section>
     <section class="page-content"><div class="container">
       <div class="admin-heading"><div><div class="eyebrow">Member resources</div><h2>Manage resources</h2></div><a class="btn ghost" href="/admin">Back to admin</a></div>
+      <div class="page-card resource-storage-summary">
+        <div><strong>Resources storage: ${formatBytes(usedBytes)} of ${formatBytes(storageLimit)}</strong><span>${formatBytes(fileLimit)} maximum per file</span></div>
+        <div class="resource-storage-track" aria-hidden="true"><span style="width:${storageLimit > 0 ? Math.min(100, (usedBytes / storageLimit) * 100) : 0}%"></span></div>
+      </div>
       <details class="admin-add-panel">
         <summary class="btn red">Add resource</summary>
         <form class="admin-edit-form add-form resource-edit-form" method="post" action="/admin/resources/save">
@@ -1073,6 +1084,14 @@ function sameOrigin(request) {
 
 function validDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value + "T00:00:00Z"));
+}
+
+function formatBytes(bytes) {
+  const value = Math.max(0, Number(bytes) || 0);
+  if (value >= 1073741824) return (value / 1073741824).toFixed(value >= 10737418240 ? 0 : 1).replace(/\.0$/, "") + " GB";
+  if (value >= 1048576) return (value / 1048576).toFixed(value >= 104857600 ? 0 : 1).replace(/\.0$/, "") + " MB";
+  if (value >= 1024) return (value / 1024).toFixed(1).replace(/\.0$/, "") + " KB";
+  return Math.round(value) + " B";
 }
 
 function positiveInt(value) {
