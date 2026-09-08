@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS users (
   display_name TEXT NOT NULL,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('member','admin')),
+  account_scope TEXT NOT NULL DEFAULT 'production' CHECK (account_scope IN ('production','uat_only')),
   active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -35,6 +36,7 @@ CREATE TABLE IF NOT EXISTS account_tokens (
   display_name TEXT,
   user_id INTEGER,
   role TEXT CHECK (role IN ('member','admin')),
+  account_scope TEXT NOT NULL DEFAULT 'production' CHECK (account_scope IN ('production','uat_only')),
   created_by INTEGER,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   expires_at TEXT NOT NULL,
@@ -48,3 +50,6 @@ CREATE INDEX IF NOT EXISTS idx_account_tokens_email ON account_tokens(email);
 CREATE INDEX IF NOT EXISTS idx_account_tokens_user_id ON account_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_account_tokens_expiry ON account_tokens(expires_at);
 
+
+CREATE INDEX IF NOT EXISTS idx_users_scope_active ON users(account_scope, active);
+CREATE INDEX IF NOT EXISTS idx_account_tokens_scope_type_expiry ON account_tokens(account_scope, type, expires_at);
