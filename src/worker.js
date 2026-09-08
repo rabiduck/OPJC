@@ -55,7 +55,9 @@ export default {
       }
 
       if (path === "/contact") {
-        return request.method === "POST" ? handleContactPrototype(request) : methodNotAllowed();
+        if (request.method === "POST") return handleContactPrototype(request);
+        if (request.method === "GET") return redirect("/contact.html");
+        return methodNotAllowed();
       }
 
       if (path === "/api/calendar") {
