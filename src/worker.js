@@ -340,26 +340,34 @@ async function membersPage(request, env) {
     categories.get(category).push(row);
   }
 
-  const resourceHtml = categories.size ? [...categories.entries()].map(([category, items]) => `
-    <section class="member-resource-section">
-      <div class="eyebrow">${escapeHtml(category)}</div>
-      <div class="member-resource-list">
+  const categoryCards = categories.size ? [...categories.entries()].map(([category, items]) => `
+    <article class="page-card member-category-card">
+      <div class="eyebrow">Resources</div>
+      <h3>${escapeHtml(category)}</h3>
+      <div class="member-card-items">
         ${items.map(item => {
-          const description = item.description ? `<p>${escapeHtml(item.description)}</p>` : "";
+          const description = item.description ? `<span>${escapeHtml(item.description)}</span>` : "";
           if (item.resource_type === "link" && item.url) {
-            return `<article class="page-card member-resource-card">
-              <div><h3>${escapeHtml(item.title)}</h3>${description}</div>
-              <a class="btn ghost" href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">Open resource</a>
-            </article>`;
+            return `<a class="member-card-item" href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">
+              <strong>${escapeHtml(item.title)}</strong>
+              ${description}
+              <small>Open resource →</small>
+            </a>`;
           }
-          return `<article class="page-card member-resource-card">
-            <div><h3>${escapeHtml(item.title)}</h3>${description}<small>${escapeHtml(item.file_name || "File resource")}</small></div>
-            <span class="status-badge pending">File coming soon</span>
-          </article>`;
+          return `<div class="member-card-item unavailable">
+            <strong>${escapeHtml(item.title)}</strong>
+            ${description}
+            <small>${escapeHtml(item.file_name || "File resource")} · coming soon</small>
+          </div>`;
         }).join("")}
       </div>
-    </section>`
-  ).join("") : '<div class="empty-state">No member resources have been published yet.</div>';
+    </article>`
+  ).join("") : `
+    <article class="page-card member-category-card">
+      <div class="eyebrow">Resources</div>
+      <h3>Club resources</h3>
+      <p>No member resources have been published yet.</p>
+    </article>`;
 
   return htmlPage("Members", `
     <section class="page-hero">
@@ -371,10 +379,14 @@ async function membersPage(request, env) {
     </section>
     <section class="page-content">
       <div class="container">
-        ${resourceHtml}
-        <div class="page-card member-account-card">
-          <div><div class="eyebrow">Your account</div><h3>${escapeHtml(user.display_name)}</h3><p>${escapeHtml(user.email)} · ${escapeHtml(user.role)}</p></div>
-          <a class="btn ghost" href="/members/account">Account settings</a>
+        <div class="member-resource-grid">
+          ${categoryCards}
+          <article class="page-card member-category-card member-account-card">
+            <div class="eyebrow">Your account</div>
+            <h3>${escapeHtml(user.display_name)}</h3>
+            <p>${escapeHtml(user.email)} · ${escapeHtml(user.role)}</p>
+            <a class="btn ghost" href="/members/account">Account settings</a>
+          </article>
         </div>
         <div class="member-actions">
           ${user.role === "admin" ? '<a class="btn ghost" href="/admin">Admin area</a>' : ""}
