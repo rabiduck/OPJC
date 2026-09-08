@@ -209,3 +209,26 @@ a.admin-dashboard-card:hover{transform:translateY(-3px);box-shadow:0 16px 42px r
   .admin-edit-form{grid-template-columns:1fr}
   .admin-form-wide,.admin-edit-form .admin-row-actions{grid-column:auto}
 }
+
+.contact-layout{display:grid;grid-template-columns:.9fr 1.1fr;gap:34px;align-items:start}
+.contact-details h2{margin-bottom:12px}
+.contact-card-stack{display:grid;gap:14px;margin-top:28px}
+.contact-info-card{display:grid;grid-template-columns:48px 1fr;gap:14px;align-items:center;padding:20px}
+.contact-icon{font-size:1.6rem}
+.contact-info-card div{display:grid;gap:2px}
+.contact-info-card small{color:var(--muted);font-weight:800}
+.contact-info-card strong{font-size:1.08rem}
+.contact-info-card span:not(.contact-icon){color:var(--muted);font-size:.92rem}
+.contact-form{display:grid;gap:18px}
+.contact-form h2{margin:0}
+.contact-form>p{margin:0;color:var(--muted)}
+.contact-form label{display:grid;gap:7px;font-weight:850}
+.contact-form input,.contact-form select,.contact-form textarea{width:100%;padding:12px 13px;border:1px solid var(--line);border-radius:11px;background:white;color:var(--ink);font:inherit}
+.contact-form textarea{resize:vertical}
+.contact-form input:focus,.contact-form select:focus,.contact-form textarea:focus{outline:3px solid rgba(36,86,154,.15);border-color:var(--blue)}
+.form-pair{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.optional{font-weight:600;color:var(--muted)}
+.anti-spam-note{display:grid;gap:2px;padding:13px 15px;border-radius:12px;background:var(--soft);border:1px solid var(--line);font-size:.9rem}
+.anti-spam-note span,.form-footnote{color:var(--muted)}
+.contact-honeypot{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+@media(max-width:850px){.contact-layout{grid-template-columns:1fr}.form-pair{grid-template-columns:1fr}}
