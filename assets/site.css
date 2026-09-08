@@ -282,3 +282,9 @@ a.member-card-item:hover{border-color:#cbd6e6;transform:translateY(-1px)}
 .resource-edit-form select:focus,.resource-edit-form input[type="url"]:focus,.resource-edit-form input[type="number"]:focus{outline:3px solid rgba(36,86,154,.15);border-color:var(--blue)}
 @media(max-width:900px){.member-resource-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:650px){.member-resource-grid{grid-template-columns:1fr}}
+
+.resource-storage-summary{display:grid;gap:12px;margin-bottom:18px;padding:20px 22px}
+.resource-storage-summary>div:first-child{display:flex;justify-content:space-between;gap:18px;flex-wrap:wrap}
+.resource-storage-summary span{color:var(--muted);font-size:.92rem}
+.resource-storage-track{height:9px;border-radius:999px;background:var(--soft);overflow:hidden}
+.resource-storage-track span{display:block;height:100%;background:var(--blue);border-radius:inherit}
