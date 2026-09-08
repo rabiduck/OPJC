@@ -76,3 +76,19 @@ async function loadCalendarData(){
   }
 }
 loadCalendarData();
+
+
+const copyButton=document.querySelector('.copy-link-button');
+const copyInput=document.querySelector('.copy-link');
+if(copyButton&&copyInput){
+  copyButton.addEventListener('click',async()=>{
+    try{
+      await navigator.clipboard.writeText(copyInput.value);
+      copyButton.textContent='Copied';
+      setTimeout(()=>copyButton.textContent='Copy link',1500);
+    }catch{
+      copyInput.focus();
+      copyInput.select();
+    }
+  });
+}

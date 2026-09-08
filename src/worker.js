@@ -1,6 +1,8 @@
 const SESSION_COOKIE = "opjc_session";
 const SESSION_DAYS = 14;
 const PBKDF2_ITERATIONS = 100000;
+const INVITE_DAYS = 7;
+const RESET_MINUTES = 60;
 
 export default {
   async fetch(request, env) {
@@ -26,6 +28,18 @@ export default {
           : methodNotAllowed();
       }
 
+      if (path === "/join") {
+        return request.method === "POST" ? handleJoin(request, env) : joinPage(request, env);
+      }
+
+      if (path === "/reset-password") {
+        return request.method === "POST" ? handlePasswordReset(request, env) : passwordResetPage(request, env);
+      }
+
+      if (path === "/members/account") {
+        return request.method === "POST" ? handleChangePassword(request, env) : accountPage(request, env);
+      }
+
       if (path === "/members" || path === "/members/") {
         return membersPage(request, env);
       }
@@ -44,6 +58,10 @@ export default {
         return request.method === "GET"
           ? calendarApi(env)
           : methodNotAllowed();
+      }
+
+      if (path === "/admin/calendar") {
+        return request.method === "GET" ? adminCalendarPage(request, env) : methodNotAllowed();
       }
 
       if (path === "/admin/calendar/event") {
@@ -68,6 +86,22 @@ export default {
         return request.method === "POST"
           ? importExistingCalendar(request, env)
           : methodNotAllowed();
+      }
+
+      if (path === "/admin/members") {
+        return request.method === "GET" ? adminMembersPage(request, env) : methodNotAllowed();
+      }
+      if (path === "/admin/members/invite") {
+        return request.method === "POST" ? createMemberInvite(request, env) : methodNotAllowed();
+      }
+      if (path === "/admin/members/reset") {
+        return request.method === "POST" ? createPasswordReset(request, env) : methodNotAllowed();
+      }
+      if (path === "/admin/members/status") {
+        return request.method === "POST" ? changeMemberStatus(request, env) : methodNotAllowed();
+      }
+      if (path === "/admin/members/revoke") {
+        return request.method === "POST" ? revokeMemberSessions(request, env) : methodNotAllowed();
       }
 
       return env.ASSETS.fetch(request);
@@ -111,6 +145,7 @@ async function loginPage(request, env) {
             <input type="password" name="password" autocomplete="current-password" required>
           </label>
           <button class="btn red" type="submit">Sign in</button>
+          <p class="auth-note">Forgotten your password? Contact a club administrator for a reset link.</p>
         </form>
       </div>
     </section>`);
@@ -208,6 +243,66 @@ async function adminPage(request, env) {
       </div></section>`, 403);
   }
 
+  const now = new Date().toISOString().slice(0, 10);
+  const [eventCount, closureCount, memberCount, inviteCount] = await Promise.all([
+    env.APP_DB.prepare("SELECT COUNT(*) AS count FROM events WHERE event_date >= ?").bind(now).first(),
+    env.APP_DB.prepare("SELECT COUNT(*) AS count FROM closures WHERE closure_date >= ?").bind(now).first(),
+    env.AUTH_DB.prepare("SELECT COUNT(*) AS count FROM users WHERE active=1").first(),
+    env.AUTH_DB.prepare("SELECT COUNT(*) AS count FROM account_tokens WHERE type='invite' AND used_at IS NULL AND expires_at > ?").bind(new Date().toISOString()).first()
+  ]);
+
+  return htmlPage("Admin", `
+    <section class="page-hero admin-hero">
+      <div class="container">
+        <div class="eyebrow">Administration</div>
+        <h1>Club admin</h1>
+        <p class="lead">Welcome back, ${escapeHtml(user.display_name)}.</p>
+      </div>
+    </section>
+    <section class="page-content">
+      <div class="container">
+        <div class="admin-dashboard-grid">
+          <a class="admin-dashboard-card" href="/admin/calendar">
+            <div class="admin-card-icon">📅</div>
+            <div class="eyebrow">Calendar</div>
+            <h2>Events & closures</h2>
+            <p>Manage competitions, gradings, club activities and dates when training is not running.</p>
+            <div class="admin-card-stats"><strong>${Number(eventCount?.count || 0)}</strong> upcoming events · <strong>${Number(closureCount?.count || 0)}</strong> closures</div>
+            <span class="admin-card-link">Manage calendar →</span>
+          </a>
+
+          <a class="admin-dashboard-card" href="/admin/members">
+            <div class="admin-card-icon">👥</div>
+            <div class="eyebrow">Access</div>
+            <h2>Members</h2>
+            <p>Invite members, manage account access, revoke sessions and issue password reset links.</p>
+            <div class="admin-card-stats"><strong>${Number(memberCount?.count || 0)}</strong> active accounts · <strong>${Number(inviteCount?.count || 0)}</strong> pending invites</div>
+            <span class="admin-card-link">Manage members →</span>
+          </a>
+
+          <article class="admin-dashboard-card disabled-card">
+            <div class="admin-card-icon">📚</div>
+            <div class="eyebrow">Coming later</div>
+            <h2>Resources</h2>
+            <p>Member-only syllabuses, club documents and useful downloads will be managed here.</p>
+            <div class="admin-card-stats">Not yet enabled</div>
+          </article>
+        </div>
+
+        <div class="member-actions admin-dashboard-actions">
+          <a class="btn ghost" href="/members">Members area</a>
+          <a class="btn ghost" href="/events.html">View public calendar</a>
+          <form method="post" action="/auth/logout"><button class="btn ghost" type="submit">Sign out</button></form>
+        </div>
+      </div>
+    </section>`);
+}
+
+async function adminCalendarPage(request, env) {
+  const user = await getCurrentUser(request, env);
+  if (!user) return redirect("/members/login?next=/admin");
+  if (user.role !== "admin") return forbidden();
+
   const events = await env.APP_DB.prepare(
     "SELECT id, event_date, title, location, description, featured FROM events ORDER BY event_date, id"
   ).all();
@@ -216,87 +311,317 @@ async function adminPage(request, env) {
   ).all();
 
   const eventRows = (events.results || []).map(row => `
-    <form class="admin-calendar-row" method="post" action="/admin/calendar/event">
-      <input type="hidden" name="id" value="${escapeHtml(row.id)}">
-      <label>Date<input type="date" name="date" value="${escapeHtml(row.event_date)}" required></label>
-      <label>Title<input type="text" name="title" value="${escapeHtml(row.title)}" required></label>
-      <label>Location<input type="text" name="location" value="${escapeHtml(row.location || "")}"></label>
-      <label>Description<textarea name="description" rows="2">${escapeHtml(row.description || "")}</textarea></label>
-      <label class="check-label"><input type="checkbox" name="featured" value="1" ${Number(row.featured) === 1 ? "checked" : ""}> Featured</label>
-      <div class="admin-row-actions">
-        <button class="btn ghost" type="submit">Save</button>
-        <button class="btn danger" type="submit" formaction="/admin/calendar/delete" name="delete_ref" value="event:${escapeHtml(row.id)}">Delete</button>
-      </div>
-    </form>`).join("");
+    <details class="admin-list-item">
+      <summary>
+        <div class="admin-list-date">${escapeHtml(formatShortDate(row.event_date))}</div>
+        <div class="admin-list-main"><strong>${escapeHtml(row.title)}</strong><span>${escapeHtml(row.location || "No location")}</span></div>
+        ${Number(row.featured) === 1 ? '<span class="status-badge pending">Featured</span>' : ""}
+        <span class="admin-edit-label">Edit</span>
+      </summary>
+      <form class="admin-edit-form" method="post" action="/admin/calendar/event">
+        <input type="hidden" name="id" value="${escapeHtml(row.id)}">
+        <label>Date<input type="date" name="date" value="${escapeHtml(row.event_date)}" required></label>
+        <label>Title<input type="text" name="title" value="${escapeHtml(row.title)}" required></label>
+        <label>Location<input type="text" name="location" value="${escapeHtml(row.location || "")}"></label>
+        <label class="admin-form-wide">Description<textarea name="description" rows="3">${escapeHtml(row.description || "")}</textarea></label>
+        <label class="check-label"><input type="checkbox" name="featured" value="1" ${Number(row.featured) === 1 ? "checked" : ""}> Featured</label>
+        <div class="admin-row-actions">
+          <button class="btn red" type="submit">Save changes</button>
+          <button class="btn danger" type="submit" formaction="/admin/calendar/delete" name="delete_ref" value="event:${escapeHtml(row.id)}">Delete</button>
+        </div>
+      </form>
+    </details>`).join("");
 
   const closureRows = (closures.results || []).map(row => `
-    <form class="admin-calendar-row" method="post" action="/admin/calendar/closure">
-      <input type="hidden" name="id" value="${escapeHtml(row.id)}">
-      <label>Date<input type="date" name="date" value="${escapeHtml(row.closure_date)}" required></label>
-      <label>Title<input type="text" name="title" value="${escapeHtml(row.title)}" required></label>
-      <label class="wide-field">Description<textarea name="description" rows="2">${escapeHtml(row.description || "")}</textarea></label>
-      <div class="admin-row-actions">
-        <button class="btn ghost" type="submit">Save</button>
-        <button class="btn danger" type="submit" formaction="/admin/calendar/delete" name="delete_ref" value="closure:${escapeHtml(row.id)}">Delete</button>
-      </div>
-    </form>`).join("");
+    <details class="admin-list-item closure-item">
+      <summary>
+        <div class="admin-list-date">${escapeHtml(formatShortDate(row.closure_date))}</div>
+        <div class="admin-list-main"><strong>${escapeHtml(row.title)}</strong><span>${escapeHtml(row.description || "No regular training")}</span></div>
+        <span class="admin-edit-label">Edit</span>
+      </summary>
+      <form class="admin-edit-form" method="post" action="/admin/calendar/closure">
+        <input type="hidden" name="id" value="${escapeHtml(row.id)}">
+        <label>Date<input type="date" name="date" value="${escapeHtml(row.closure_date)}" required></label>
+        <label>Title<input type="text" name="title" value="${escapeHtml(row.title)}" required></label>
+        <label class="admin-form-wide">Description<textarea name="description" rows="3">${escapeHtml(row.description || "")}</textarea></label>
+        <div class="admin-row-actions">
+          <button class="btn red" type="submit">Save changes</button>
+          <button class="btn danger" type="submit" formaction="/admin/calendar/delete" name="delete_ref" value="closure:${escapeHtml(row.id)}">Delete</button>
+        </div>
+      </form>
+    </details>`).join("");
 
   const isEmpty = !(events.results || []).length && !(closures.results || []).length;
 
-  return htmlPage("Admin", `
-    <section class="page-hero">
+  return htmlPage("Calendar management", `
+    <section class="page-hero admin-hero">
       <div class="container">
-        <div class="eyebrow">Administration</div>
-        <h1>Club admin</h1>
-        <p class="lead">Authenticated as ${escapeHtml(user.display_name)}.</p>
+        <div class="eyebrow">Administration · Calendar</div>
+        <h1>Events & closures</h1>
+        <p class="lead">Manage the dates shown on the public club calendar.</p>
       </div>
     </section>
     <section class="page-content">
       <div class="container">
         <div class="admin-heading">
-          <div><div class="eyebrow">Calendar</div><h2>Events & closures</h2></div>
-          <a class="btn ghost" href="/events.html">View public calendar</a>
+          <div><div class="eyebrow">Calendar</div><h2>Manage dates</h2></div>
+          <div class="admin-heading-actions">
+            <a class="btn ghost" href="/admin">Admin home</a>
+            <a class="btn ghost" href="/events.html">View public calendar</a>
+          </div>
         </div>
 
         ${isEmpty ? `
           <div class="page-card import-card">
             <h3>Import the existing calendar</h3>
             <p>The application database is empty. Import the current events and closure dates from the existing site data.</p>
-            <form method="post" action="/admin/calendar/import">
-              <button class="btn red" type="submit">Import existing calendar</button>
-            </form>
+            <form method="post" action="/admin/calendar/import"><button class="btn red" type="submit">Import existing calendar</button></form>
           </div>` : ""}
 
-        <section class="admin-calendar-section">
-          <h3>Events</h3>
-          <form class="admin-calendar-row new-row" method="post" action="/admin/calendar/event">
-            <label>Date<input type="date" name="date" required></label>
-            <label>Title<input type="text" name="title" required></label>
-            <label>Location<input type="text" name="location"></label>
-            <label>Description<textarea name="description" rows="2"></textarea></label>
-            <label class="check-label"><input type="checkbox" name="featured" value="1"> Featured</label>
-            <div class="admin-row-actions"><button class="btn red" type="submit">Add event</button></div>
-          </form>
-          <div class="admin-calendar-list">${eventRows || '<div class="empty-state">No events in the database yet.</div>'}</div>
+        <section class="admin-management-section">
+          <div class="admin-section-title"><div><div class="eyebrow">Upcoming</div><h2>Events</h2></div></div>
+          <details class="admin-add-panel">
+            <summary class="btn red">Add event</summary>
+            <form class="admin-edit-form add-form" method="post" action="/admin/calendar/event">
+              <label>Date<input type="date" name="date" required></label>
+              <label>Title<input type="text" name="title" required></label>
+              <label>Location<input type="text" name="location"></label>
+              <label class="admin-form-wide">Description<textarea name="description" rows="3"></textarea></label>
+              <label class="check-label"><input type="checkbox" name="featured" value="1"> Featured</label>
+              <div class="admin-row-actions"><button class="btn red" type="submit">Create event</button></div>
+            </form>
+          </details>
+          <div class="admin-simple-list">${eventRows || '<div class="empty-state">No events in the database yet.</div>'}</div>
         </section>
 
-        <section class="admin-calendar-section">
-          <h3>Closures</h3>
-          <form class="admin-calendar-row new-row" method="post" action="/admin/calendar/closure">
-            <label>Date<input type="date" name="date" required></label>
-            <label>Title<input type="text" name="title" value="Club closed" required></label>
-            <label class="wide-field">Description<textarea name="description" rows="2"></textarea></label>
-            <div class="admin-row-actions"><button class="btn red" type="submit">Add closure</button></div>
-          </form>
-          <div class="admin-calendar-list">${closureRows || '<div class="empty-state">No closures in the database yet.</div>'}</div>
+        <section class="admin-management-section">
+          <div class="admin-section-title"><div><div class="eyebrow">No training</div><h2>Closures</h2></div></div>
+          <details class="admin-add-panel">
+            <summary class="btn red">Add closure</summary>
+            <form class="admin-edit-form add-form" method="post" action="/admin/calendar/closure">
+              <label>Date<input type="date" name="date" required></label>
+              <label>Title<input type="text" name="title" value="Club closed" required></label>
+              <label class="admin-form-wide">Description<textarea name="description" rows="3"></textarea></label>
+              <div class="admin-row-actions"><button class="btn red" type="submit">Create closure</button></div>
+            </form>
+          </details>
+          <div class="admin-simple-list">${closureRows || '<div class="empty-state">No closures in the database yet.</div>'}</div>
         </section>
-
-        <div class="member-actions">
-          <a class="btn ghost" href="/members">Members area</a>
-          <form method="post" action="/auth/logout"><button class="btn ghost" type="submit">Sign out</button></form>
-        </div>
       </div>
     </section>`);
+}
+
+
+async function accountPage(request, env) {
+  const user = await getCurrentUser(request, env);
+  if (!user) return redirect("/members/login?next=/members");
+  return htmlPage("Account settings",
+    '<section class="page-hero"><div class="container"><div class="eyebrow">Members area</div><h1>Account settings</h1><p class="lead">Signed in as ' + escapeHtml(user.email) + '.</p></div></section>' +
+    '<section class="page-content"><div class="container auth-wrap"><form class="page-card auth-card" method="post" action="/members/account">' +
+    '<h2>Change password</h2><label>Current password<input type="password" name="current_password" autocomplete="current-password" required></label>' +
+    '<label>New password<input type="password" name="new_password" autocomplete="new-password" minlength="12" required></label>' +
+    '<label>Confirm new password<input type="password" name="confirm_password" autocomplete="new-password" minlength="12" required></label>' +
+    '<button class="btn red" type="submit">Change password</button></form><div class="member-actions"><a class="btn ghost" href="/members">Back to members</a></div></div></section>');
+}
+
+async function handleChangePassword(request, env) {
+  if (!sameOrigin(request)) return forbidden();
+  const user = await getCurrentUser(request, env);
+  if (!user) return redirect("/members/login?next=/members");
+  const form = await request.formData();
+  const currentPassword = String(form.get("current_password") || "");
+  const newPassword = String(form.get("new_password") || "");
+  const confirmPassword = String(form.get("confirm_password") || "");
+  const row = await env.AUTH_DB.prepare("SELECT password_hash FROM users WHERE id=? AND active=1").bind(user.id).first();
+  if (!row || !(await verifyPassword(currentPassword, row.password_hash))) return accountMessage("Password not changed", "The current password was not recognised.", 400);
+  if (newPassword.length < 12 || newPassword !== confirmPassword) return accountMessage("Password not changed", "The new passwords must match and be at least 12 characters.", 400);
+  const hash = await hashPassword(newPassword);
+  await env.AUTH_DB.batch([
+    env.AUTH_DB.prepare("UPDATE users SET password_hash=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(hash, user.id),
+    env.AUTH_DB.prepare("UPDATE sessions SET revoked_at=CURRENT_TIMESTAMP WHERE user_id=? AND revoked_at IS NULL").bind(user.id)
+  ]);
+  return redirect("/members/login", {"Set-Cookie": SESSION_COOKIE + "=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax"});
+}
+
+function accountMessage(title, message, status) {
+  return htmlPage(title, '<section class="page-content"><div class="container auth-wrap"><div class="page-card auth-card"><div class="eyebrow">Account</div><h2>' + escapeHtml(title) + '</h2><p>' + escapeHtml(message) + '</p><a class="btn ghost" href="/members/account">Back to account settings</a></div></div></section>', status || 200);
+}
+
+async function adminMembersPage(request, env) {
+  const admin = await getCurrentUser(request, env);
+  if (!admin) return redirect("/members/login?next=/admin");
+  if (admin.role !== "admin") return forbidden();
+  const users = await env.AUTH_DB.prepare("SELECT id,email,display_name,role,active,created_at FROM users ORDER BY display_name COLLATE NOCASE,email").all();
+  const invites = await env.AUTH_DB.prepare("SELECT id,email,display_name,role,expires_at FROM account_tokens WHERE type='invite' AND used_at IS NULL AND expires_at>? ORDER BY created_at DESC").bind(new Date().toISOString()).all();
+
+  const userRows = (users.results || []).map(function(row) {
+    const status = Number(row.active) === 1 ? "Active" : "Disabled";
+    const toggle = Number(row.id) === Number(admin.id) ? "" :
+      '<form method="post" action="/admin/members/status"><input type="hidden" name="user_id" value="' + escapeHtml(row.id) + '"><input type="hidden" name="active" value="' + (Number(row.active) === 1 ? "0" : "1") + '"><button class="btn ' + (Number(row.active) === 1 ? "danger" : "ghost") + '" type="submit">' + (Number(row.active) === 1 ? "Disable" : "Enable") + '</button></form>';
+    return '<article class="member-admin-row"><div><strong>' + escapeHtml(row.display_name) + '</strong><span>' + escapeHtml(row.email) + '</span></div>' +
+      '<div class="member-badges"><span class="status-badge">' + escapeHtml(row.role) + '</span><span class="status-badge ' + status.toLowerCase() + '">' + status + '</span></div>' +
+      '<div class="member-admin-actions"><form method="post" action="/admin/members/reset"><input type="hidden" name="user_id" value="' + escapeHtml(row.id) + '"><button class="btn ghost" type="submit">Reset link</button></form>' +
+      '<form method="post" action="/admin/members/revoke"><input type="hidden" name="user_id" value="' + escapeHtml(row.id) + '"><button class="btn ghost" type="submit">Revoke sessions</button></form>' + toggle + '</div></article>';
+  }).join("");
+
+  const inviteRows = (invites.results || []).map(function(row) {
+    return '<article class="member-admin-row pending"><div><strong>' + escapeHtml(row.display_name || "Pending member") + '</strong><span>' + escapeHtml(row.email || "") + '</span></div>' +
+      '<div class="member-badges"><span class="status-badge pending">Invited</span></div><div class="member-admin-meta">Expires ' + escapeHtml(formatDateTime(row.expires_at)) + '</div></article>';
+  }).join("");
+
+  return htmlPage("Member access",
+    '<section class="page-hero"><div class="container"><div class="eyebrow">Administration</div><h1>Member access</h1><p class="lead">Invite members, manage access and issue password-reset links.</p></div></section>' +
+    '<section class="page-content"><div class="container"><div class="admin-heading"><div><div class="eyebrow">Invite only</div><h2>Invite a member</h2></div><a class="btn ghost" href="/admin">Back to admin</a></div>' +
+    '<form class="page-card member-invite-form" method="post" action="/admin/members/invite"><label>Name<input type="text" name="display_name" required></label><label>Email address<input type="email" name="email" required></label><label>Role<select name="role"><option value="member" selected>Member</option><option value="admin">Administrator</option></select></label><div><button class="btn red" type="submit">Create invite</button></div></form>' +
+    '<section class="admin-calendar-section"><h3>Members</h3><div class="member-admin-list">' + (userRows || '<div class="empty-state">No member accounts yet.</div>') + '</div></section>' +
+    '<section class="admin-calendar-section"><h3>Pending invitations</h3><div class="member-admin-list">' + (inviteRows || '<div class="empty-state">No pending invitations.</div>') + '</div></section></div></section>');
+}
+
+async function createMemberInvite(request, env) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return forbidden();
+  const form = await request.formData();
+  const displayName = String(form.get("display_name") || "").trim();
+  const email = String(form.get("email") || "").trim();
+  const role = String(form.get("role") || "member");
+  if (!displayName || !isEmail(email) || !["member","admin"].includes(role)) return badRequest("A valid name, email address and role are required.");
+  const existing = await env.AUTH_DB.prepare("SELECT id FROM users WHERE email=? COLLATE NOCASE LIMIT 1").bind(email).first();
+  if (existing) return badRequest("An account already exists for that email address.");
+  await env.AUTH_DB.prepare("UPDATE account_tokens SET used_at=CURRENT_TIMESTAMP WHERE type='invite' AND email=? COLLATE NOCASE AND used_at IS NULL").bind(email).run();
+  const token = randomToken(32);
+  const tokenHash = await sha256Hex(token);
+  const expires = new Date(Date.now() + INVITE_DAYS * 86400000).toISOString();
+  await env.AUTH_DB.prepare("INSERT INTO account_tokens (id,token_hash,type,email,display_name,role,created_by,expires_at) VALUES (?,?,'invite',?,?,?,?,?)").bind(crypto.randomUUID(), tokenHash, email, displayName, role, admin.id, expires).run();
+  const link = new URL("/join", request.url); link.searchParams.set("token", token);
+  return linkPage("Member invitation created", "Send this single-use invitation link to the member. It expires in 7 days.", link.toString(), "/admin/members");
+}
+
+async function joinPage(request, env) {
+  const token = new URL(request.url).searchParams.get("token") || "";
+  const invite = await lookupAccountToken(env, token, "invite");
+  if (!invite) return tokenInvalidPage("Invitation unavailable", "This invitation is invalid, expired or has already been used.");
+  return htmlPage("Join OPJC members",
+    '<section class="page-hero"><div class="container"><div class="eyebrow">Members area</div><h1>Set up your account</h1><p class="lead">You have been invited to the Old Priory Judo Club members area.</p></div></section>' +
+    '<section class="page-content"><div class="container auth-wrap"><form class="page-card auth-card" method="post" action="/join"><input type="hidden" name="token" value="' + escapeHtml(token) + '">' +
+    '<label>Name<input type="text" value="' + escapeHtml(invite.display_name || "") + '" disabled></label><label>Email address<input type="email" value="' + escapeHtml(invite.email || "") + '" disabled></label>' +
+    '<label>Password<input type="password" name="password" autocomplete="new-password" minlength="12" required></label><label>Confirm password<input type="password" name="confirm_password" autocomplete="new-password" minlength="12" required></label><button class="btn red" type="submit">Create account</button></form></div></section>');
+}
+
+async function handleJoin(request, env) {
+  if (!sameOrigin(request)) return forbidden();
+  const form = await request.formData();
+  const token = String(form.get("token") || "");
+  const password = String(form.get("password") || "");
+  const confirmPassword = String(form.get("confirm_password") || "");
+  const invite = await lookupAccountToken(env, token, "invite");
+  if (!invite) return tokenInvalidPage("Invitation unavailable", "This invitation is invalid, expired or has already been used.");
+  if (password.length < 12 || password !== confirmPassword) return tokenInvalidPage("Account not created", "The passwords must match and be at least 12 characters.");
+  const existing = await env.AUTH_DB.prepare("SELECT id FROM users WHERE email=? COLLATE NOCASE LIMIT 1").bind(invite.email).first();
+  if (existing) return tokenInvalidPage("Account not created", "An account already exists for this email address.");
+  const passwordHash = await hashPassword(password);
+  await env.AUTH_DB.prepare("INSERT INTO users (email,display_name,password_hash,role,active) VALUES (?,?,?,?,1)").bind(invite.email, invite.display_name, passwordHash, invite.role || "member").run();
+  await env.AUTH_DB.prepare("UPDATE account_tokens SET used_at=CURRENT_TIMESTAMP WHERE id=? AND used_at IS NULL").bind(invite.id).run();
+  return htmlPage("Account created", '<section class="page-content"><div class="container auth-wrap"><div class="page-card auth-card"><div class="eyebrow">Members area</div><h2>Account created</h2><p>Your account is ready. You can now sign in.</p><a class="btn red" href="/members/login">Sign in</a></div></div></section>');
+}
+
+async function createPasswordReset(request, env) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return forbidden();
+  const form = await request.formData();
+  const userId = positiveInt(form.get("user_id"));
+  if (!userId) return badRequest("Invalid user.");
+  const user = await env.AUTH_DB.prepare("SELECT id,email,display_name FROM users WHERE id=? LIMIT 1").bind(userId).first();
+  if (!user) return badRequest("User not found.");
+  await env.AUTH_DB.prepare("UPDATE account_tokens SET used_at=CURRENT_TIMESTAMP WHERE type='reset' AND user_id=? AND used_at IS NULL").bind(user.id).run();
+  const token = randomToken(32);
+  const tokenHash = await sha256Hex(token);
+  const expires = new Date(Date.now() + RESET_MINUTES * 60000).toISOString();
+  await env.AUTH_DB.prepare("INSERT INTO account_tokens (id,token_hash,type,email,display_name,user_id,created_by,expires_at) VALUES (?,?,'reset',?,?,?,?,?)").bind(crypto.randomUUID(), tokenHash, user.email, user.display_name, user.id, admin.id, expires).run();
+  const link = new URL("/reset-password", request.url); link.searchParams.set("token", token);
+  return linkPage("Password reset link created", "Send this single-use link to the member. It expires in 60 minutes.", link.toString(), "/admin/members");
+}
+
+async function passwordResetPage(request, env) {
+  const token = new URL(request.url).searchParams.get("token") || "";
+  const reset = await lookupAccountToken(env, token, "reset");
+  if (!reset) return tokenInvalidPage("Reset unavailable", "This reset link is invalid, expired or has already been used.");
+  return htmlPage("Reset password", '<section class="page-hero"><div class="container"><div class="eyebrow">Members area</div><h1>Reset password</h1><p class="lead">Set a new password for ' + escapeHtml(reset.email || "your account") + '.</p></div></section><section class="page-content"><div class="container auth-wrap"><form class="page-card auth-card" method="post" action="/reset-password"><input type="hidden" name="token" value="' + escapeHtml(token) + '"><label>New password<input type="password" name="password" minlength="12" required></label><label>Confirm password<input type="password" name="confirm_password" minlength="12" required></label><button class="btn red" type="submit">Set new password</button></form></div></section>');
+}
+
+async function handlePasswordReset(request, env) {
+  if (!sameOrigin(request)) return forbidden();
+  const form = await request.formData();
+  const token = String(form.get("token") || "");
+  const password = String(form.get("password") || "");
+  const confirmPassword = String(form.get("confirm_password") || "");
+  const reset = await lookupAccountToken(env, token, "reset");
+  if (!reset || !reset.user_id) return tokenInvalidPage("Reset unavailable", "This reset link is invalid, expired or has already been used.");
+  if (password.length < 12 || password !== confirmPassword) return tokenInvalidPage("Password not changed", "The passwords must match and be at least 12 characters.");
+  const hash = await hashPassword(password);
+  await env.AUTH_DB.batch([
+    env.AUTH_DB.prepare("UPDATE users SET password_hash=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(hash, reset.user_id),
+    env.AUTH_DB.prepare("UPDATE sessions SET revoked_at=CURRENT_TIMESTAMP WHERE user_id=? AND revoked_at IS NULL").bind(reset.user_id),
+    env.AUTH_DB.prepare("UPDATE account_tokens SET used_at=CURRENT_TIMESTAMP WHERE id=? AND used_at IS NULL").bind(reset.id)
+  ]);
+  return htmlPage("Password changed", '<section class="page-content"><div class="container auth-wrap"><div class="page-card auth-card"><div class="eyebrow">Members area</div><h2>Password changed</h2><p>Your existing sessions have been signed out. You can now sign in with the new password.</p><a class="btn red" href="/members/login">Sign in</a></div></div></section>');
+}
+
+async function changeMemberStatus(request, env) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return forbidden();
+  const form = await request.formData();
+  const userId = positiveInt(form.get("user_id"));
+  const active = String(form.get("active")) === "1" ? 1 : 0;
+  if (!userId || Number(userId) === Number(admin.id)) return badRequest("You cannot disable your own account.");
+  await env.AUTH_DB.batch([
+    env.AUTH_DB.prepare("UPDATE users SET active=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(active, userId),
+    env.AUTH_DB.prepare("UPDATE sessions SET revoked_at=CURRENT_TIMESTAMP WHERE user_id=? AND revoked_at IS NULL").bind(userId)
+  ]);
+  return redirect("/admin/members");
+}
+
+async function revokeMemberSessions(request, env) {
+  const admin = await requireAdmin(request, env);
+  if (!admin) return forbidden();
+  const form = await request.formData();
+  const userId = positiveInt(form.get("user_id"));
+  if (!userId) return badRequest("Invalid user.");
+  await env.AUTH_DB.prepare("UPDATE sessions SET revoked_at=CURRENT_TIMESTAMP WHERE user_id=? AND revoked_at IS NULL").bind(userId).run();
+  return redirect("/admin/members");
+}
+
+async function lookupAccountToken(env, token, type) {
+  if (!token) return null;
+  const hash = await sha256Hex(token);
+  return env.AUTH_DB.prepare("SELECT id,type,email,display_name,user_id,role,expires_at FROM account_tokens WHERE token_hash=? AND type=? AND used_at IS NULL AND expires_at>? LIMIT 1").bind(hash, type, new Date().toISOString()).first();
+}
+
+function tokenInvalidPage(title, message) {
+  return htmlPage(title, '<section class="page-content"><div class="container auth-wrap"><div class="page-card auth-card"><div class="eyebrow">Members area</div><h2>' + escapeHtml(title) + '</h2><p>' + escapeHtml(message) + '</p><a class="btn ghost" href="/">Back to home</a></div></div></section>', 400);
+}
+
+function linkPage(title, message, link, back) {
+  return htmlPage(title, '<section class="page-content"><div class="container auth-wrap"><div class="page-card auth-card"><div class="eyebrow">Administration</div><h2>' + escapeHtml(title) + '</h2><p>' + escapeHtml(message) + '</p><label>Link<input class="copy-link" type="text" readonly value="' + escapeHtml(link) + '"></label><button class="btn red copy-link-button" type="button">Copy link</button><a class="btn ghost" href="' + escapeHtml(back) + '">Back to member access</a></div></div></section>');
+}
+
+function isEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value));
+}
+
+function formatShortDate(value) {
+  try {
+    return new Intl.DateTimeFormat("en-GB", {day:"2-digit", month:"short", year:"numeric", timeZone:"UTC"}).format(new Date(value + "T00:00:00Z"));
+  } catch {
+    return String(value || "");
+  }
+}
+
+function formatDateTime(value) {
+  try {
+    return new Intl.DateTimeFormat("en-GB", {dateStyle:"medium",timeStyle:"short",timeZone:"Europe/London"}).format(new Date(value));
+  } catch {
+    return String(value || "");
+  }
 }
 
 async function setupPage(request, env) {
@@ -408,7 +733,7 @@ async function saveCalendarEvent(request, env) {
       "INSERT INTO events (event_date, title, location, description, featured) VALUES (?, ?, ?, ?, ?)"
     ).bind(date, title, location || null, description || null, featured).run();
   }
-  return redirect("/admin");
+  return redirect("/admin/calendar");
 }
 
 async function saveCalendarClosure(request, env) {
@@ -429,7 +754,7 @@ async function saveCalendarClosure(request, env) {
       "INSERT INTO closures (closure_date, title, description) VALUES (?, ?, ?)"
     ).bind(date, title, description || null).run();
   }
-  return redirect("/admin");
+  return redirect("/admin/calendar");
 }
 
 async function deleteCalendarItem(request, env) {
@@ -445,7 +770,7 @@ async function deleteCalendarItem(request, env) {
   } else {
     await env.APP_DB.prepare("DELETE FROM closures WHERE id=?").bind(id).run();
   }
-  return redirect("/admin");
+  return redirect("/admin/calendar");
 }
 
 async function importExistingCalendar(request, env) {
@@ -476,7 +801,7 @@ async function importExistingCalendar(request, env) {
     ).bind(item.date, item.title || "Club closed", item.description || null));
   }
   if (statements.length) await env.APP_DB.batch(statements);
-  return redirect("/admin");
+  return redirect("/admin/calendar");
 }
 
 function sameOrigin(request) {
@@ -653,7 +978,7 @@ function htmlPage(title, content, status = 200) {
   <nav class="nav">
     <div class="container nav-inner">
       <a class="brand" href="/"><span class="mark"><img src="/assets/old-priory-logo.webp" alt="Old Priory Judo Club logo"></span><span>Old Priory Judo Club<small>York · Est. 1947</small></span></a>
-      <div class="links"><a class="nav-link" href="/">Home</a><a class="nav-link" href="/events.html">Events</a><a class="nav-link" href="/history.html">History</a><a class="nav-link" href="/instructors.html">Instructors</a></div>
+      <div class="links"><a class="nav-link" href="/">Home</a><a class="nav-link" href="/events.html">Events</a><a class="nav-link" href="/history.html">History</a><a class="nav-link" href="/instructors.html">Instructors</a><a class="btn ghost" href="/members">Members</a></div>
     </div>
   </nav>
   <main>${content}</main>
