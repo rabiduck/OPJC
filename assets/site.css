@@ -232,3 +232,6 @@ a.admin-dashboard-card:hover{transform:translateY(-3px);box-shadow:0 16px 42px r
 .anti-spam-note span,.form-footnote{color:var(--muted)}
 .contact-honeypot{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
 @media(max-width:850px){.contact-layout{grid-template-columns:1fr}.form-pair{grid-template-columns:1fr}}
+
+.contact-map{overflow:hidden;border:1px solid var(--line);border-radius:20px;box-shadow:0 8px 30px rgba(18,54,100,.06);background:white}
+.contact-map iframe{display:block;width:100%;height:320px;border:0}
