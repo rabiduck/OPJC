@@ -892,7 +892,7 @@ function htmlPage(title, content, status = 200) {
   <nav class="nav">
     <div class="container nav-inner">
       <a class="brand" href="/"><span class="mark"><img src="/assets/old-priory-logo.webp" alt="Old Priory Judo Club logo"></span><span>Old Priory Judo Club<small>York · Est. 1947</small></span></a>
-      <div class="links"><a class="nav-link" href="/">Home</a><a class="nav-link" href="/events.html">Events</a><a class="nav-link" href="/history.html">History</a><a class="nav-link" href="/instructors.html">Instructors</a></div>
+      <div class="links"><a class="nav-link" href="/">Home</a><a class="nav-link" href="/events.html">Events</a><a class="nav-link" href="/history.html">History</a><a class="nav-link" href="/instructors.html">Instructors</a><a class="btn ghost" href="/members">Members</a></div>
     </div>
   </nav>
   <main>${content}</main>
