@@ -288,3 +288,8 @@ a.member-card-item:hover{border-color:#cbd6e6;transform:translateY(-1px)}
 .resource-storage-summary span{color:var(--muted);font-size:.92rem}
 .resource-storage-track{height:9px;border-radius:999px;background:var(--soft);overflow:hidden}
 .resource-storage-track span{display:block;height:100%;background:var(--blue);border-radius:inherit}
+
+.resource-edit-form input[type="file"]{width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:white;color:var(--ink);font:inherit}
+.resource-edit-form label>small{display:block;margin-top:5px;color:var(--muted);font-weight:600}
+.resource-current-file{display:flex;gap:8px 14px;align-items:baseline;flex-wrap:wrap;margin:2px 0 8px;padding:10px 12px;border-radius:10px;background:var(--soft);border:1px solid var(--line)}
+.resource-current-file span{color:var(--muted);font-weight:600}
