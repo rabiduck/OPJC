@@ -56,7 +56,10 @@ export default {
 
       if (path === "/contact") {
         if (request.method === "POST") return handleContactPrototype(request);
-        if (request.method === "GET") return redirect("/contact.html");
+        if (request.method === "GET") {
+          const contactUrl = new URL("/contact.html", request.url);
+          return env.ASSETS.fetch(new Request(contactUrl, request));
+        }
         return methodNotAllowed();
       }
 
