@@ -54,6 +54,10 @@ export default {
           : setupPage(request, env);
       }
 
+      if (path === "/contact") {
+        return request.method === "POST" ? handleContactPrototype(request) : methodNotAllowed();
+      }
+
       if (path === "/api/calendar") {
         return request.method === "GET"
           ? calendarApi(env)
@@ -118,6 +122,41 @@ export default {
     }
   }
 };
+
+async function handleContactPrototype(request) {
+  if (!sameOrigin(request)) return forbidden();
+  const form = await request.formData();
+  const name = String(form.get("name") || "").trim();
+  const email = String(form.get("email") || "").trim();
+  const subject = String(form.get("subject") || "").trim();
+  const message = String(form.get("message") || "").trim();
+  const website = String(form.get("website") || "").trim();
+
+  if (website) return redirect("/contact.html");
+  if (!name || !isEmail(email) || !subject || !message || name.length > 100 || email.length > 200 || message.length > 3000) {
+    return htmlPage("Contact form", `
+      <section class="page-content"><div class="container auth-wrap">
+        <div class="page-card auth-card">
+          <div class="eyebrow">Contact</div>
+          <h2>Check the form</h2>
+          <p>Please provide your name, a valid email address, an enquiry type and a message.</p>
+          <a class="btn ghost" href="/contact.html">Back to contact form</a>
+        </div>
+      </div></section>`, 400);
+  }
+
+  return htmlPage("Enquiry received", `
+    <section class="page-content"><div class="container auth-wrap">
+      <div class="page-card auth-card">
+        <div class="eyebrow">Prototype contact form</div>
+        <h2>Thanks, ${escapeHtml(name)}.</h2>
+        <p>The form has been accepted successfully. During the prototype phase no email is sent and the enquiry is not stored.</p>
+        <p>Once outbound mail is configured, this same form will deliver enquiries to the club mailbox after spam verification.</p>
+        <a class="btn red" href="/">Back to home</a>
+        <a class="btn ghost" href="/contact.html">Back to contact</a>
+      </div>
+    </div></section>`);
+}
 
 async function loginPage(request, env) {
   const user = await getCurrentUser(request, env);
@@ -978,7 +1017,7 @@ function htmlPage(title, content, status = 200) {
   <nav class="nav">
     <div class="container nav-inner">
       <a class="brand" href="/"><span class="mark"><img src="/assets/old-priory-logo.webp" alt="Old Priory Judo Club logo"></span><span>Old Priory Judo Club<small>York · Est. 1947</small></span></a>
-      <div class="links"><a class="nav-link" href="/">Home</a><a class="nav-link" href="/events.html">Events</a><a class="nav-link" href="/history.html">History</a><a class="nav-link" href="/instructors.html">Instructors</a><a class="btn ghost" href="/members">Members</a></div>
+      <div class="links"><a class="nav-link" href="/">Home</a><a class="nav-link" href="/events.html">Events</a><a class="nav-link" href="/history.html">History</a><a class="nav-link" href="/instructors.html">Instructors</a><a class="nav-link" href="/contact.html">Contact</a><a class="btn ghost" href="/members">Members</a></div>
     </div>
   </nav>
   <main>${content}</main>
