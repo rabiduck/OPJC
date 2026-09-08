@@ -4,14 +4,6 @@
   "compatibility_date": "2026-09-05",
   "assets": {
     "directory": ".",
-    "exclude": [
-      ".git/**",
-      ".github/**",
-      "README.md",
-      "wrangler*.jsonc",
-      "schema/**",
-      "src/**"
-    ],
     "binding": "ASSETS",
     "run_worker_first": true
   },
@@ -24,7 +16,7 @@
     {
       "binding": "APP_DB",
       "database_name": "opjc-prod",
-      "database_id": "ef7103a7-c0cd-419c-8ed2-061cba6d18fc"
+      "database_id": "e76e7dbf-251f-4ec1-9d68-c4c82180212a"
     }
   ],
   "main": "src/worker.js",
