@@ -229,45 +229,67 @@ async function setupPage(request, env) {
 }
 
 async function handleSetup(request, env) {
-  const count = await env.AUTH_DB.prepare("SELECT COUNT(*) AS count FROM users").first();
-  if (Number(count?.count || 0) > 0) return notFound();
+  let stage = "start";
+  try {
+    console.log("OPJC setup stage", stage);
 
-  const bootstrapToken = env.BOOTSTRAP_TOKEN?.get ? await env.BOOTSTRAP_TOKEN.get() : env.BOOTSTRAP_TOKEN;
-  if (!bootstrapToken) {
+    stage = "count-users";
+    const count = await env.AUTH_DB.prepare("SELECT COUNT(*) AS count FROM users").first();
+    console.log("OPJC setup stage", stage, "complete");
+    if (Number(count?.count || 0) > 0) return notFound();
+
+    stage = "read-bootstrap-token";
+    const bootstrapToken = env.BOOTSTRAP_TOKEN?.get ? await env.BOOTSTRAP_TOKEN.get() : env.BOOTSTRAP_TOKEN;
+    console.log("OPJC setup stage", stage, "complete", Boolean(bootstrapToken));
+    if (!bootstrapToken) {
     return htmlPage("Setup unavailable", `
       <section class="page-content"><div class="container">
         <div class="page-card"><h2>Setup is not enabled.</h2><p>The BOOTSTRAP_TOKEN secret has not been configured.</p></div>
       </div></section>`, 503);
   }
 
-  const form = await request.formData();
-  const setupKey = String(form.get("setup_key") || "");
-  const displayName = String(form.get("display_name") || "").trim();
-  const email = String(form.get("email") || "").trim();
-  const password = String(form.get("password") || "");
+    stage = "read-form";
+    const form = await request.formData();
+    const setupKey = String(form.get("setup_key") || "");
+    const displayName = String(form.get("display_name") || "").trim();
+    const email = String(form.get("email") || "").trim();
+    const password = String(form.get("password") || "");
+    console.log("OPJC setup stage", stage, "complete");
 
-  if (!constantTimeEqual(setupKey, bootstrapToken)) return forbidden();
-  if (!displayName || !email || password.length < 12) {
+    stage = "validate-token";
+    if (!constantTimeEqual(setupKey, bootstrapToken)) return forbidden();
+    console.log("OPJC setup stage", stage, "complete");
+    if (!displayName || !email || password.length < 12) {
     return htmlPage("Invalid setup", `
       <section class="page-content"><div class="container">
         <div class="page-card"><h2>Check the details.</h2><p>A name, valid email and password of at least 12 characters are required.</p></div>
       </div></section>`, 400);
   }
 
-  const passwordHash = await hashPassword(password);
+    stage = "hash-password";
+    console.log("OPJC setup stage", stage);
+    const passwordHash = await hashPassword(password);
+    console.log("OPJC setup stage", stage, "complete");
 
-  try {
+    stage = "insert-user";
     await env.AUTH_DB.prepare(
       "INSERT INTO users (email, display_name, password_hash, role, active) VALUES (?, ?, ?, 'admin', 1)"
     ).bind(email, displayName, passwordHash).run();
-  } catch {
-    return htmlPage("Setup failed", `
-      <section class="page-content"><div class="container">
-        <div class="page-card"><h2>Account could not be created.</h2><p>Please check the details and try again.</p></div>
-      </div></section>`, 400);
-  }
+    console.log("OPJC setup stage", stage, "complete");
 
-  return redirect("/members/login");
+    return redirect("/members/login");
+  } catch (error) {
+    console.error("OPJC setup failed at stage", stage, error);
+    return htmlPage("Setup diagnostic", `
+      <section class="page-content"><div class="container">
+        <div class="page-card">
+          <div class="eyebrow">UAT diagnostic</div>
+          <h2>Initial setup failed.</h2>
+          <p>Failure stage: <strong>${escapeHtml(stage)}</strong></p>
+          <p>No secret or password values are shown.</p>
+        </div>
+      </div></section>`, 500);
+  }
 }
 
 async function getCurrentUser(request, env) {
