@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS resources (
   file_key TEXT,
   file_name TEXT,
   mime_type TEXT,
+  file_size INTEGER NOT NULL DEFAULT 0 CHECK (file_size >= 0),
   active INTEGER NOT NULL DEFAULT 1
     CHECK (active IN (0,1)),
   sort_order INTEGER NOT NULL DEFAULT 0,
