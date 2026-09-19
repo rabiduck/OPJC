@@ -1092,7 +1092,7 @@ async function adminMembersPage(request, env) {
       '<form method="post" action="/admin/members/status"><input type="hidden" name="user_id" value="' + escapeHtml(row.id) + '"><input type="hidden" name="active" value="' + (Number(row.active) === 1 ? "0" : "1") + '"><button class="btn ' + (Number(row.active) === 1 ? "danger" : "ghost") + '" type="submit">' + (Number(row.active) === 1 ? "Disable" : "Enable") + '</button></form>';
     return '<article class="member-admin-row"><div><strong>' + escapeHtml(row.display_name) + '</strong><span>' + escapeHtml(row.email) + '</span></div>' +
       '<div class="member-badges"><span class="status-badge">' + escapeHtml(row.role) + '</span>' + scopeBadge + '<span class="status-badge ' + status.toLowerCase() + '">' + status + '</span></div>' +
-      '<div class="member-admin-actions"><form method="post" action="/admin/members/reset"><input type="hidden" name="user_id" value="' + escapeHtml(row.id) + '"><button class="btn ghost" type="submit">Reset link</button></form>' +
+      '<div class="member-admin-actions"><form method="post" action="/admin/members/reset"><input type="hidden" name="user_id" value="' + escapeHtml(row.id) + '"><button class="btn ghost" type="submit">Send reset email</button></form>' +
       '<form method="post" action="/admin/members/revoke"><input type="hidden" name="user_id" value="' + escapeHtml(row.id) + '"><button class="btn ghost" type="submit">Revoke sessions</button></form>' + toggle + '</div></article>';
   }).join("");
 
@@ -1278,9 +1278,30 @@ async function handleJoin(request, env) {
   return htmlPage("Account created", '<section class="page-content"><div class="container auth-wrap"><div class="page-card auth-card"><div class="eyebrow">Members area</div><h2>Account created</h2><p>Your account is ready. You can now sign in.</p><a class="btn red" href="/members/login">Sign in</a></div></div></section>');
 }
 
+function resetDeliveryPage(user, link, delivery, sent) {
+  const deliveryText = delivery.redirected
+    ? 'For UAT testing, the email was sent to <strong>' + escapeHtml(delivery.recipient) + '</strong> instead of ' + escapeHtml(user.email) + '.'
+    : 'The password reset email was sent to <strong>' + escapeHtml(delivery.recipient) + '</strong>.';
+
+  const statusBlock = sent
+    ? '<div class="anti-spam-note"><strong>Email sent</strong><span>' + deliveryText + '</span></div>'
+    : '<div class="anti-spam-note"><strong>Email not sent</strong><span>The reset link was created successfully, but email delivery failed. You can still copy and send the link manually.</span></div>';
+
+  return htmlPage("Password reset created",
+    '<section class="page-content"><div class="container auth-wrap"><div class="page-card auth-card">' +
+    '<div class="eyebrow">Administration</div><h2>Password reset created</h2>' +
+    '<p>A single-use reset link has been created for <strong>' + escapeHtml(user.display_name || user.email) + '</strong>. It expires in 60 minutes.</p>' +
+    statusBlock +
+    '<label>Reset link<input class="copy-link" type="text" readonly value="' + escapeHtml(link) + '"></label>' +
+    '<button class="btn red copy-link-button" type="button">Copy link</button>' +
+    '<a class="btn ghost" href="/admin/members">Back to member access</a>' +
+    '</div></div></section>');
+}
+
 async function createPasswordReset(request, env) {
   const admin = await requireAdmin(request, env);
   if (!admin) return forbidden();
+
   const form = await request.formData();
   const userId = positiveInt(form.get("user_id"));
   if (!userId) return badRequest("Invalid user.");
@@ -1303,8 +1324,46 @@ async function createPasswordReset(request, env) {
 
   const link = new URL("/reset-password", request.url);
   link.searchParams.set("token", token);
-  return linkPage("Password reset link created", "Send this single-use link to the member. It expires in 60 minutes.", link.toString(), "/admin/members");
+
+  const delivery = mailDeliveryTarget(env, user.email);
+  const safeName = escapeHtml(user.display_name || user.email);
+  const safeLink = escapeHtml(link.toString());
+  const uatLine = isUatEnvironment(env)
+    ? "This reset was generated from the OPJC UAT site."
+    : "This reset was generated from the Old Priory Judo Club members site.";
+
+  const mail = await sendTransactionalEmail(env, {
+    to: delivery.recipient,
+    subject: "Reset your Old Priory Judo Club password",
+    text: [
+      `Hi ${user.display_name || "there"},`,
+      "",
+      "A password reset has been requested for your Old Priory Judo Club member account.",
+      "Use the link below to choose a new password:",
+      "",
+      link.toString(),
+      "",
+      "This single-use link expires in 60 minutes.",
+      "If you were not expecting this reset, you can ignore this email."
+    ].join("\n"),
+    html: `
+      <div style="font-family:Arial,sans-serif;max-width:680px;margin:auto;color:#151515">
+        <h2 style="color:#24569a">Reset your password</h2>
+        <p>Hi ${safeName},</p>
+        <p>A password reset has been requested for your Old Priory Judo Club member account.</p>
+        <p style="margin:28px 0"><a href="${safeLink}" style="display:inline-block;background:#e21b23;color:#fff;text-decoration:none;font-weight:bold;padding:13px 20px;border-radius:999px">Reset your password</a></p>
+        <p>This single-use link expires in <strong>60 minutes</strong>.</p>
+        <p style="color:#62666b">${escapeHtml(uatLine)}</p>
+        <p>If the button does not work, copy and paste this address into your browser:</p>
+        <p style="word-break:break-all"><a href="${safeLink}">${safeLink}</a></p>
+        <hr style="border:0;border-top:1px solid #e5e8ee;margin:24px 0">
+        <p style="color:#62666b;font-size:13px">If you were not expecting this password reset, you can ignore this email. Your password will not change unless the reset link is used.</p>
+      </div>`
+  });
+
+  return resetDeliveryPage(user, link.toString(), delivery, mail.ok);
 }
+
 async function passwordResetPage(request, env) {
   const token = new URL(request.url).searchParams.get("token") || "";
   const reset = await lookupAccountToken(env, token, "reset");
