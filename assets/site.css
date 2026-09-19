@@ -54,6 +54,13 @@
 .page-card{background:white;border:1px solid var(--line);border-radius:22px;padding:30px;box-shadow:0 8px 30px rgba(18,54,100,.06)}
 .placeholder-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:30px}
 .placeholder-grid h3{margin-top:0}.placeholder-grid p{color:var(--muted);margin-bottom:0}
+.history-stack{display:grid;gap:24px}
+.history-article{padding:36px 40px}
+.history-article h2{margin-top:.45rem}
+.history-article p{max-width:880px}
+.history-article p:last-child{margin-bottom:0}
+.history-club{border-left:7px solid var(--red)}
+@media(max-width:560px){.history-article{padding:26px 24px}}
 @media(max-width:900px){
   .nav-inner{position:relative}
   .menu-toggle{display:block;flex:0 0 auto}
