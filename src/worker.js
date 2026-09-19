@@ -168,7 +168,7 @@ function contactPage(env) {
       <div class="container">
         <div class="eyebrow">Get in touch</div>
         <h1>Contact</h1>
-        <p class="lead">Questions about starting judo, class times or the club? Send us a message or give us a call.</p>
+        <p class="lead">Questions about starting Judo or Karate, class times or the club? Send us a message or give us a call.</p>
       </div>
     </section>
     <section class="page-content">
@@ -176,7 +176,7 @@ function contactPage(env) {
         <div class="contact-details">
           <div class="eyebrow">Old Priory Judo Club</div>
           <h2>We'd be happy to hear from you.</h2>
-          <p class="lead">New starters are welcome from age 5, and the club offers three free trial sessions.</p>
+          <p class="lead">Interested in training at Old Priory? Send us an enquiry and the club can help with the most suitable session.</p>
           <div class="contact-card-stack">
             <article class="page-card contact-info-card">
               <span class="contact-icon">☎</span>
@@ -215,7 +215,7 @@ function contactPage(env) {
           <label>What can we help with?
             <select name="subject" required>
               <option value="">Choose an option</option>
-              <option>Free trial / new starter</option>
+              <option>Free trial / new starter</option>\n              <option>Karate / new starter</option>
               <option>Class information</option>
               <option>Competition or grading</option>
               <option>Existing member enquiry</option>
@@ -1833,7 +1833,7 @@ function htmlPage(title, content, status = 200) {
   <nav class="nav">
     <div class="container nav-inner">
       <a class="brand" href="/"><span class="mark"><img src="/assets/old-priory-logo.webp" alt="Old Priory Judo Club logo"></span><span>Old Priory Judo Club<small>York · Est. 1947</small></span></a>
-      <div class="links"><a class="nav-link" href="/">Home</a><a class="nav-link" href="/events.html">Events</a><a class="nav-link" href="/history.html">History</a><a class="nav-link" href="/instructors.html">Instructors</a><a class="nav-link" href="/contact">Contact</a><a class="btn ghost" href="/members">Members</a></div>
+      <div class="links"><div class="discipline-switch" aria-label="Choose discipline"><a class="active judo" href="/">Judo</a><a href="/karate.html">Karate</a></div><a class="nav-link" href="/">Home</a><a class="nav-link" href="/events.html">Events</a><a class="nav-link" href="/history.html">History</a><a class="nav-link" href="/instructors.html">Instructors</a><a class="nav-link" href="/contact">Contact</a><a class="btn ghost" href="/members">Members</a></div>
     </div>
   </nav>
   <main>${content}</main>

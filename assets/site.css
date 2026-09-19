@@ -348,3 +348,35 @@ a.member-card-item:hover{border-color:#cbd6e6;transform:translateY(-1px)}
   .anniversary-layout{grid-template-columns:1fr}
   .anniversary-callout{align-items:flex-start;flex-direction:column}
 }
+
+
+/* Judo / Karate public-site switcher */
+.discipline-switch{display:inline-flex;align-items:center;gap:2px;padding:3px;border:1px solid var(--line);border-radius:999px;background:white;white-space:nowrap}
+.discipline-switch a{padding:6px 10px;border-radius:999px;font-size:.78rem;font-weight:950;color:var(--muted)}
+.discipline-switch a.active.judo{background:var(--blue);color:white}
+.discipline-switch a.active.karate{background:#2f7d32;color:white}
+@media(max-width:900px){.links .discipline-switch{margin:0 0 8px}.discipline-switch a{flex:1;text-align:center}}
+
+/* Karate sibling site */
+.karate-page{--karate:#2f7d32;--karate-dark:#194d22;--karate-soft:#eef7ef}
+.karate-page .eyebrow,.karate-page .nav-link.active{color:var(--karate)}
+.karate-page .btn.karate{background:var(--karate);color:white;box-shadow:0 10px 26px rgba(47,125,50,.22)}
+.karate-page .btn.karate:hover{transform:translateY(-2px)}
+.karate-page .btn.ghost{border-color:var(--karate);color:var(--karate)}
+.karate-page .day{background:var(--karate)}
+.karate-page .trust{color:var(--karate-dark)}
+.karate-page .trust b{color:var(--karate)}
+.karate-page .cta{background:var(--karate-dark)}
+.karate-page .cta .btn{background:white;color:var(--karate-dark)}
+.karate-page .card:nth-child(odd) .icon{background:var(--karate);color:white}
+.karate-page .card:nth-child(even) .icon{background:#dfeee0;color:var(--karate-dark)}
+.karate-page .history-club{border-left-color:var(--karate)}
+.karate-hero{padding:70px 0 64px;background:linear-gradient(135deg,#fffdf8 0%,#f3faf3 100%);overflow:hidden}
+.karate-hero-art{min-height:470px;border-radius:30px;background:linear-gradient(145deg,#eef7ef,#dceede);border:8px solid white;display:grid;place-items:center;box-shadow:var(--shadow);position:relative;overflow:hidden}
+.karate-hero-art:before{content:"";position:absolute;width:330px;height:330px;border-radius:50%;background:white;opacity:.72}
+.karate-hero-art img{position:relative;z-index:1;width:min(78%,350px);height:auto;filter:drop-shadow(0 16px 24px rgba(24,76,33,.15))}
+.karate-brand-panel{background:var(--karate-soft);border-color:#d5e8d7}
+.karate-brand-panel img{display:block;width:min(100%,320px);margin:0 auto 18px}
+.karate-note{padding:16px 18px;border-radius:14px;background:var(--karate-soft);border-left:5px solid var(--karate);color:#315738}
+.karate-page footer{background:#173e20}
+@media(max-width:560px){.karate-hero{padding-top:44px}.karate-hero-art{min-height:330px}}
