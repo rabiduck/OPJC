@@ -1123,7 +1123,7 @@ async function sendTransactionalEmail(env, message) {
     const response = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
-        "Authorization": \`Bearer \${env.RESEND_API_KEY}\`,
+        "Authorization": `Bearer ${env.RESEND_API_KEY}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
@@ -1220,7 +1220,7 @@ async function createMemberInvite(request, env) {
     to: delivery.recipient,
     subject: "Your Old Priory Judo Club member account",
     text: [
-      \`Hi \${displayName},\`,
+      `Hi ${displayName},`,
       "",
       "You have been invited to the Old Priory Judo Club members area.",
       "Use the link below to choose your password and activate your account:",
@@ -1231,20 +1231,20 @@ async function createMemberInvite(request, env) {
       scopeLine,
       "",
       "If you were not expecting this invitation, you can ignore this email."
-    ].join("\\n"),
-    html: \`
+    ].join("\n"),
+    html: `
       <div style="font-family:Arial,sans-serif;max-width:680px;margin:auto;color:#151515">
         <h2 style="color:#24569a">Welcome to Old Priory Judo Club</h2>
-        <p>Hi \${safeName},</p>
+        <p>Hi ${safeName},</p>
         <p>You have been invited to the Old Priory Judo Club members area.</p>
-        <p style="margin:28px 0"><a href="\${safeLink}" style="display:inline-block;background:#e21b23;color:#fff;text-decoration:none;font-weight:bold;padding:13px 20px;border-radius:999px">Complete your account</a></p>
+        <p style="margin:28px 0"><a href="${safeLink}" style="display:inline-block;background:#e21b23;color:#fff;text-decoration:none;font-weight:bold;padding:13px 20px;border-radius:999px">Complete your account</a></p>
         <p>This single-use link expires in <strong>7 days</strong>.</p>
-        <p style="color:#62666b">\${escapeHtml(scopeLine)}</p>
+        <p style="color:#62666b">${escapeHtml(scopeLine)}</p>
         <p>If the button does not work, copy and paste this address into your browser:</p>
-        <p style="word-break:break-all"><a href="\${safeLink}">\${safeLink}</a></p>
+        <p style="word-break:break-all"><a href="${safeLink}">${safeLink}</a></p>
         <hr style="border:0;border-top:1px solid #e5e8ee;margin:24px 0">
         <p style="color:#62666b;font-size:13px">If you were not expecting this invitation, you can ignore this email.</p>
-      </div>\`
+      </div>`
   });
 
   return inviteDeliveryPage(displayName, email, link.toString(), delivery, mail.ok);
