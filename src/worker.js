@@ -4,8 +4,7 @@ const PBKDF2_ITERATIONS = 100000;
 const INVITE_DAYS = 7;
 const RESET_MINUTES = 60;
 
-export default {
-  async fetch(request, env) {
+async function handleRequest(request, env) {
     const url = new URL(request.url);
     const path = url.pathname;
 
@@ -61,9 +60,13 @@ export default {
           : setupPage(request, env);
       }
 
+      if (path === "/contact.html") {
+        return request.method === "GET" ? redirect("/contact") : methodNotAllowed();
+      }
+
       if (path === "/contact") {
-        if (request.method === "POST") return handleContactPrototype(request);
-        if (request.method === "GET") return contactPage();
+        if (request.method === "POST") return handleContactForm(request, env);
+        if (request.method === "GET") return contactPage(env);
         return methodNotAllowed();
       }
 
@@ -139,10 +142,27 @@ export default {
           </div>
         </div></section>`, 500);
     }
+}
+
+function applyEnvironmentHeaders(response, env) {
+  if (String(env.AUTH_ENVIRONMENT || "").toLowerCase() !== "uat") return response;
+
+  const headers = new Headers(response.headers);
+  headers.set("X-Robots-Tag", "noindex, nofollow");
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  });
+}
+
+export default {
+  async fetch(request, env) {
+    return applyEnvironmentHeaders(await handleRequest(request, env), env);
   }
 };
 
-function contactPage() {
+function contactPage(env) {
   return htmlPage("Contact", `
     <section class="page-hero">
       <div class="container">
@@ -186,7 +206,7 @@ function contactPage() {
         <form class="page-card contact-form" method="post" action="/contact">
           <div class="eyebrow">Send an enquiry</div>
           <h2>Contact the club</h2>
-          <p>This prototype demonstrates the enquiry form. Messages are not yet delivered to a mailbox.</p>
+          <p>Send your enquiry to the club and we'll get back to you as soon as we can.</p>
           <div class="form-pair">
             <label>Your name<input type="text" name="name" autocomplete="name" maxlength="100" required></label>
             <label>Email address<input type="email" name="email" autocomplete="email" maxlength="200" required></label>
@@ -206,25 +226,60 @@ function contactPage() {
           <div class="contact-honeypot" aria-hidden="true">
             <label>Leave this field empty<input type="text" name="website" tabindex="-1" autocomplete="off"></label>
           </div>
-          <div class="anti-spam-note"><strong>Spam protection</strong><span>Cloudflare Turnstile will be enabled before the form goes live.</span></div>
-          <button class="btn red" type="submit">Send enquiry</button>
-          <small class="form-footnote">Prototype only — submitting this form does not send an email.</small>
+          <div class="anti-spam-note"><strong>Spam protection</strong><span>This form is protected by Cloudflare Turnstile and a hidden spam check.</span></div>
+          ${env.TURNSTILE_SITEKEY
+            ? `<div class="cf-turnstile" data-sitekey="${escapeHtml(env.TURNSTILE_SITEKEY)}"></div>`
+            : `<div class="anti-spam-note"><strong>Form unavailable</strong><span>Spam protection is not configured yet.</span></div>`}
+          <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+          <button class="btn red" type="submit" ${env.TURNSTILE_SITEKEY ? "" : "disabled"}>Send enquiry</button>
+          <small class="form-footnote">Your message is emailed to the club so they can respond to your enquiry.</small>
         </form>
       </div>
     </section>`);
 }
 
-async function handleContactPrototype(request) {
+async function handleContactForm(request, env) {
   if (!sameOrigin(request)) return forbidden();
+
   const form = await request.formData();
   const name = String(form.get("name") || "").trim();
   const email = String(form.get("email") || "").trim();
+  const phone = String(form.get("phone") || "").trim();
   const subject = String(form.get("subject") || "").trim();
   const message = String(form.get("message") || "").trim();
   const website = String(form.get("website") || "").trim();
 
-  if (website) return redirect("/contact.html");
-  if (!name || !isEmail(email) || !subject || !message || name.length > 100 || email.length > 200 || message.length > 3000) {
+  const allowedSubjects = new Set([
+    "Free trial / new starter",
+    "Class information",
+    "Competition or grading",
+    "Existing member enquiry",
+    "General enquiry"
+  ]);
+
+  // Quietly accept honeypot submissions without sending mail.
+  if (website) {
+    return htmlPage("Enquiry received", `
+      <section class="page-content"><div class="container auth-wrap">
+        <div class="page-card auth-card">
+          <div class="eyebrow">Contact</div>
+          <h2>Thanks.</h2>
+          <p>Your enquiry has been received.</p>
+          <a class="btn red" href="/">Back to home</a>
+        </div>
+      </div></section>`);
+  }
+
+  if (
+    !name ||
+    !isEmail(email) ||
+    !allowedSubjects.has(subject) ||
+    !message ||
+    name.length > 100 ||
+    email.length > 200 ||
+    phone.length > 40 ||
+    message.length > 3000
+  ) {
     return htmlPage("Contact form", `
       <section class="page-content"><div class="container auth-wrap">
         <div class="page-card auth-card">
@@ -236,17 +291,136 @@ async function handleContactPrototype(request) {
       </div></section>`, 400);
   }
 
-  return htmlPage("Enquiry received", `
+  const turnstileToken = String(form.get("cf-turnstile-response") || "");
+  const turnstile = await verifyTurnstile(turnstileToken, request, env);
+
+  if (!turnstile.success) {
+    console.warn("Turnstile validation failed", turnstile.errorCodes || []);
+    return htmlPage("Contact form", `
+      <section class="page-content"><div class="container auth-wrap">
+        <div class="page-card auth-card">
+          <div class="eyebrow">Contact</div>
+          <h2>Please verify you're human.</h2>
+          <p>The spam-protection check did not complete successfully. Please return to the form and try again.</p>
+          <a class="btn ghost" href="/contact">Back to contact form</a>
+        </div>
+      </div></section>`, 400);
+  }
+
+  if (!env.RESEND_API_KEY || !env.CONTACT_TO) {
+    console.error("Contact email is not configured: missing RESEND_API_KEY or CONTACT_TO");
+    return htmlPage("Contact form", `
+      <section class="page-content"><div class="container auth-wrap">
+        <div class="page-card auth-card">
+          <div class="eyebrow">Contact</div>
+          <h2>We couldn't send that just now.</h2>
+          <p>The email service is temporarily unavailable. Please try again later or contact the club by telephone.</p>
+          <a class="btn ghost" href="/contact">Back to contact form</a>
+        </div>
+      </div></section>`, 503);
+  }
+
+  const safeName = escapeHtml(name);
+  const safeEmail = escapeHtml(email);
+  const safePhone = escapeHtml(phone || "Not provided");
+  const safeSubject = escapeHtml(subject);
+  const safeMessage = escapeHtml(message).replace(/\n/g, "<br>");
+
+  const mailResponse = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${env.RESEND_API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      from: env.CONTACT_FROM || "Old Priory Judo Club <onboarding@resend.dev>",
+      to: [env.CONTACT_TO],
+      reply_to: email,
+      subject: `[OPJC website] ${subject} — ${name}`,
+      text: [
+        "New enquiry from the Old Priory Judo Club website",
+        "",
+        `Name: ${name}`,
+        `Email: ${email}`,
+        `Telephone: ${phone || "Not provided"}`,
+        `Enquiry type: ${subject}`,
+        "",
+        "Message:",
+        message
+      ].join("\n"),
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:680px;margin:auto;color:#151515">
+          <h2 style="color:#24569a">New website enquiry</h2>
+          <p><strong>Name:</strong> ${safeName}</p>
+          <p><strong>Email:</strong> <a href="mailto:${safeEmail}">${safeEmail}</a></p>
+          <p><strong>Telephone:</strong> ${safePhone}</p>
+          <p><strong>Enquiry type:</strong> ${safeSubject}</p>
+          <hr style="border:0;border-top:1px solid #e5e8ee;margin:24px 0">
+          <p><strong>Message</strong></p>
+          <p>${safeMessage}</p>
+          <hr style="border:0;border-top:1px solid #e5e8ee;margin:24px 0">
+          <p style="color:#62666b;font-size:13px">Sent from the Old Priory Judo Club website contact form. Replying to this email will reply directly to the visitor.</p>
+        </div>`
+    })
+  });
+
+  if (!mailResponse.ok) {
+    const errorText = await mailResponse.text();
+    console.error("Resend contact email failed", mailResponse.status, errorText);
+    return htmlPage("Contact form", `
+      <section class="page-content"><div class="container auth-wrap">
+        <div class="page-card auth-card">
+          <div class="eyebrow">Contact</div>
+          <h2>We couldn't send that just now.</h2>
+          <p>Your message hasn't been sent. Please try again in a moment or contact the club by telephone.</p>
+          <a class="btn ghost" href="/contact">Back to contact form</a>
+        </div>
+      </div></section>`, 502);
+  }
+
+  return htmlPage("Enquiry sent", `
     <section class="page-content"><div class="container auth-wrap">
       <div class="page-card auth-card">
-        <div class="eyebrow">Prototype contact form</div>
-        <h2>Thanks, ${escapeHtml(name)}.</h2>
-        <p>The form has been accepted successfully. During the prototype phase no email is sent and the enquiry is not stored.</p>
-        <p>Once outbound mail is configured, this same form will deliver enquiries to the club mailbox after spam verification.</p>
+        <div class="eyebrow">Contact</div>
+        <h2>Thanks, ${safeName}.</h2>
+        <p>Your enquiry has been emailed to Old Priory Judo Club. Someone from the club will get back to you as soon as they can.</p>
         <a class="btn red" href="/">Back to home</a>
-        <a class="btn ghost" href="/contact">Back to contact</a>
+        <a class="btn ghost" href="/contact">Send another enquiry</a>
       </div>
     </div></section>`);
+}
+
+async function verifyTurnstile(token, request, env) {
+  if (!token || !env.TURNSTILE_SECRET_KEY) {
+    return { success: false, errorCodes: ["missing-input"] };
+  }
+
+  try {
+    const body = new FormData();
+    body.append("secret", env.TURNSTILE_SECRET_KEY);
+    body.append("response", token);
+
+    const remoteIp = request.headers.get("CF-Connecting-IP");
+    if (remoteIp) body.append("remoteip", remoteIp);
+
+    const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST",
+      body
+    });
+
+    if (!response.ok) {
+      return { success: false, errorCodes: [`siteverify-http-${response.status}`] };
+    }
+
+    const result = await response.json();
+    return {
+      success: result.success === true,
+      errorCodes: Array.isArray(result["error-codes"]) ? result["error-codes"] : []
+    };
+  } catch (error) {
+    console.error("Turnstile verification error", error);
+    return { success: false, errorCodes: ["siteverify-unavailable"] };
+  }
 }
 
 async function loginPage(request, env) {
@@ -918,7 +1092,7 @@ async function adminMembersPage(request, env) {
       '<form method="post" action="/admin/members/status"><input type="hidden" name="user_id" value="' + escapeHtml(row.id) + '"><input type="hidden" name="active" value="' + (Number(row.active) === 1 ? "0" : "1") + '"><button class="btn ' + (Number(row.active) === 1 ? "danger" : "ghost") + '" type="submit">' + (Number(row.active) === 1 ? "Disable" : "Enable") + '</button></form>';
     return '<article class="member-admin-row"><div><strong>' + escapeHtml(row.display_name) + '</strong><span>' + escapeHtml(row.email) + '</span></div>' +
       '<div class="member-badges"><span class="status-badge">' + escapeHtml(row.role) + '</span>' + scopeBadge + '<span class="status-badge ' + status.toLowerCase() + '">' + status + '</span></div>' +
-      '<div class="member-admin-actions"><form method="post" action="/admin/members/reset"><input type="hidden" name="user_id" value="' + escapeHtml(row.id) + '"><button class="btn ghost" type="submit">Reset link</button></form>' +
+      '<div class="member-admin-actions"><form method="post" action="/admin/members/reset"><input type="hidden" name="user_id" value="' + escapeHtml(row.id) + '"><button class="btn ghost" type="submit">Send reset email</button></form>' +
       '<form method="post" action="/admin/members/revoke"><input type="hidden" name="user_id" value="' + escapeHtml(row.id) + '"><button class="btn ghost" type="submit">Revoke sessions</button></form>' + toggle + '</div></article>';
   }).join("");
 
@@ -929,19 +1103,88 @@ async function adminMembersPage(request, env) {
   }).join("");
 
   const scopeNote = isUatEnvironment(env)
-    ? '<p class="auth-note">Invitations created in UAT are UAT-only. Production accounts remain available here for testing.</p>'
+    ? '<p class="auth-note">Invitations created in UAT are UAT-only. Production accounts remain available here for testing.</p>' +
+      (env.MAIL_TEST_RECIPIENT ? '<p class="auth-note">UAT email delivery is redirected to <strong>' + escapeHtml(env.MAIL_TEST_RECIPIENT) + '</strong>. The account itself will still be created for the email address entered above.</p>' : '')
     : "";
 
   return htmlPage("Member access",
     '<section class="page-hero"><div class="container"><div class="eyebrow">Administration</div><h1>Member access</h1><p class="lead">Invite members, manage access and issue password-reset links.</p></div></section>' +
     '<section class="page-content"><div class="container"><div class="admin-heading"><div><div class="eyebrow">Invite only</div><h2>Invite a member</h2></div><a class="btn ghost" href="/admin">Back to admin</a></div>' +
-    '<form class="page-card member-invite-form" method="post" action="/admin/members/invite"><label>Name<input type="text" name="display_name" required></label><label>Email address<input type="email" name="email" required></label><label>Role<select name="role"><option value="member" selected>Member</option><option value="admin">Administrator</option></select></label><div><button class="btn red" type="submit">Create invite</button></div>' + scopeNote + '</form>' +
+    '<form class="page-card member-invite-form" method="post" action="/admin/members/invite"><label>Name<input type="text" name="display_name" required></label><label>Email address<input type="email" name="email" required></label><label>Role<select name="role"><option value="member" selected>Member</option><option value="admin">Administrator</option></select></label><div><button class="btn red" type="submit">Create &amp; send invite</button></div>' + scopeNote + '</form>' +
     '<section class="admin-calendar-section"><h3>Members</h3><div class="member-admin-list">' + (userRows || '<div class="empty-state">No member accounts yet.</div>') + '</div></section>' +
     '<section class="admin-calendar-section"><h3>Pending invitations</h3><div class="member-admin-list">' + (inviteRows || '<div class="empty-state">No pending invitations.</div>') + '</div></section></div></section>');
 }
+async function sendTransactionalEmail(env, message) {
+  if (!env.RESEND_API_KEY) {
+    return { ok: false, error: "RESEND_API_KEY is not configured" };
+  }
+
+  try {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${env.RESEND_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        from: env.MAIL_FROM || env.CONTACT_FROM || "Old Priory Judo Club <onboarding@resend.dev>",
+        to: [message.to],
+        subject: message.subject,
+        text: message.text,
+        html: message.html
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("Transactional email failed", response.status, errorText);
+      return { ok: false, status: response.status, error: errorText };
+    }
+
+    let result = null;
+    try { result = await response.json(); } catch {}
+    return { ok: true, id: result?.id || "" };
+  } catch (error) {
+    console.error("Transactional email error", error);
+    return { ok: false, error: String(error) };
+  }
+}
+
+function mailDeliveryTarget(env, intendedRecipient) {
+  const testRecipient = String(env.MAIL_TEST_RECIPIENT || "").trim();
+  if (isUatEnvironment(env) && testRecipient) {
+    return {
+      recipient: testRecipient,
+      redirected: testRecipient.toLowerCase() !== String(intendedRecipient || "").toLowerCase()
+    };
+  }
+  return { recipient: intendedRecipient, redirected: false };
+}
+
+function inviteDeliveryPage(name, intendedEmail, link, delivery, sent, back = "/admin/members") {
+  const deliveryText = delivery.redirected
+    ? 'For UAT testing, the email was sent to <strong>' + escapeHtml(delivery.recipient) + '</strong> instead of ' + escapeHtml(intendedEmail) + '.'
+    : 'The invitation email was sent to <strong>' + escapeHtml(delivery.recipient) + '</strong>.';
+
+  const statusBlock = sent
+    ? '<div class="anti-spam-note"><strong>Email sent</strong><span>' + deliveryText + '</span></div>'
+    : '<div class="anti-spam-note"><strong>Email not sent</strong><span>The invitation was created successfully, but email delivery failed. You can still copy and send the link manually.</span></div>';
+
+  return htmlPage("Member invitation created",
+    '<section class="page-content"><div class="container auth-wrap"><div class="page-card auth-card">' +
+    '<div class="eyebrow">Administration</div><h2>Invitation created</h2>' +
+    '<p>An invitation for <strong>' + escapeHtml(name) + '</strong> (' + escapeHtml(intendedEmail) + ') has been created. The link expires in 7 days.</p>' +
+    statusBlock +
+    '<label>Invite link<input class="copy-link" type="text" readonly value="' + escapeHtml(link) + '"></label>' +
+    '<button class="btn red copy-link-button" type="button">Copy link</button>' +
+    '<a class="btn ghost" href="' + escapeHtml(back) + '">Back to member access</a>' +
+    '</div></div></section>');
+}
+
 async function createMemberInvite(request, env) {
   const admin = await requireAdmin(request, env);
   if (!admin) return forbidden();
+
   const form = await request.formData();
   const displayName = String(form.get("display_name") || "").trim();
   const email = String(form.get("email") || "").trim();
@@ -965,9 +1208,48 @@ async function createMemberInvite(request, env) {
 
   const link = new URL("/join", request.url);
   link.searchParams.set("token", token);
-  const scopeMessage = accountScope === "uat_only" ? " This account will be available on UAT only." : "";
-  return linkPage("Member invitation created", "Send this single-use invitation link to the member. It expires in 7 days." + scopeMessage, link.toString(), "/admin/members");
+
+  const delivery = mailDeliveryTarget(env, email);
+  const safeName = escapeHtml(displayName);
+  const safeLink = escapeHtml(link.toString());
+  const scopeLine = accountScope === "uat_only"
+    ? "This is a UAT-only test account and will not exist on the live site."
+    : "This invitation is for the Old Priory Judo Club members area.";
+
+  const mail = await sendTransactionalEmail(env, {
+    to: delivery.recipient,
+    subject: "Your Old Priory Judo Club member account",
+    text: [
+      `Hi ${displayName},`,
+      "",
+      "You have been invited to the Old Priory Judo Club members area.",
+      "Use the link below to choose your password and activate your account:",
+      "",
+      link.toString(),
+      "",
+      "This single-use link expires in 7 days.",
+      scopeLine,
+      "",
+      "If you were not expecting this invitation, you can ignore this email."
+    ].join("\n"),
+    html: `
+      <div style="font-family:Arial,sans-serif;max-width:680px;margin:auto;color:#151515">
+        <h2 style="color:#24569a">Welcome to Old Priory Judo Club</h2>
+        <p>Hi ${safeName},</p>
+        <p>You have been invited to the Old Priory Judo Club members area.</p>
+        <p style="margin:28px 0"><a href="${safeLink}" style="display:inline-block;background:#e21b23;color:#fff;text-decoration:none;font-weight:bold;padding:13px 20px;border-radius:999px">Complete your account</a></p>
+        <p>This single-use link expires in <strong>7 days</strong>.</p>
+        <p style="color:#62666b">${escapeHtml(scopeLine)}</p>
+        <p>If the button does not work, copy and paste this address into your browser:</p>
+        <p style="word-break:break-all"><a href="${safeLink}">${safeLink}</a></p>
+        <hr style="border:0;border-top:1px solid #e5e8ee;margin:24px 0">
+        <p style="color:#62666b;font-size:13px">If you were not expecting this invitation, you can ignore this email.</p>
+      </div>`
+  });
+
+  return inviteDeliveryPage(displayName, email, link.toString(), delivery, mail.ok);
 }
+
 async function joinPage(request, env) {
   const token = new URL(request.url).searchParams.get("token") || "";
   const invite = await lookupAccountToken(env, token, "invite");
@@ -996,9 +1278,30 @@ async function handleJoin(request, env) {
   return htmlPage("Account created", '<section class="page-content"><div class="container auth-wrap"><div class="page-card auth-card"><div class="eyebrow">Members area</div><h2>Account created</h2><p>Your account is ready. You can now sign in.</p><a class="btn red" href="/members/login">Sign in</a></div></div></section>');
 }
 
+function resetDeliveryPage(user, link, delivery, sent) {
+  const deliveryText = delivery.redirected
+    ? 'For UAT testing, the email was sent to <strong>' + escapeHtml(delivery.recipient) + '</strong> instead of ' + escapeHtml(user.email) + '.'
+    : 'The password reset email was sent to <strong>' + escapeHtml(delivery.recipient) + '</strong>.';
+
+  const statusBlock = sent
+    ? '<div class="anti-spam-note"><strong>Email sent</strong><span>' + deliveryText + '</span></div>'
+    : '<div class="anti-spam-note"><strong>Email not sent</strong><span>The reset link was created successfully, but email delivery failed. You can still copy and send the link manually.</span></div>';
+
+  return htmlPage("Password reset created",
+    '<section class="page-content"><div class="container auth-wrap"><div class="page-card auth-card">' +
+    '<div class="eyebrow">Administration</div><h2>Password reset created</h2>' +
+    '<p>A single-use reset link has been created for <strong>' + escapeHtml(user.display_name || user.email) + '</strong>. It expires in 60 minutes.</p>' +
+    statusBlock +
+    '<label>Reset link<input class="copy-link" type="text" readonly value="' + escapeHtml(link) + '"></label>' +
+    '<button class="btn red copy-link-button" type="button">Copy link</button>' +
+    '<a class="btn ghost" href="/admin/members">Back to member access</a>' +
+    '</div></div></section>');
+}
+
 async function createPasswordReset(request, env) {
   const admin = await requireAdmin(request, env);
   if (!admin) return forbidden();
+
   const form = await request.formData();
   const userId = positiveInt(form.get("user_id"));
   if (!userId) return badRequest("Invalid user.");
@@ -1021,8 +1324,46 @@ async function createPasswordReset(request, env) {
 
   const link = new URL("/reset-password", request.url);
   link.searchParams.set("token", token);
-  return linkPage("Password reset link created", "Send this single-use link to the member. It expires in 60 minutes.", link.toString(), "/admin/members");
+
+  const delivery = mailDeliveryTarget(env, user.email);
+  const safeName = escapeHtml(user.display_name || user.email);
+  const safeLink = escapeHtml(link.toString());
+  const uatLine = isUatEnvironment(env)
+    ? "This reset was generated from the OPJC UAT site."
+    : "This reset was generated from the Old Priory Judo Club members site.";
+
+  const mail = await sendTransactionalEmail(env, {
+    to: delivery.recipient,
+    subject: "Reset your Old Priory Judo Club password",
+    text: [
+      `Hi ${user.display_name || "there"},`,
+      "",
+      "A password reset has been requested for your Old Priory Judo Club member account.",
+      "Use the link below to choose a new password:",
+      "",
+      link.toString(),
+      "",
+      "This single-use link expires in 60 minutes.",
+      "If you were not expecting this reset, you can ignore this email."
+    ].join("\n"),
+    html: `
+      <div style="font-family:Arial,sans-serif;max-width:680px;margin:auto;color:#151515">
+        <h2 style="color:#24569a">Reset your password</h2>
+        <p>Hi ${safeName},</p>
+        <p>A password reset has been requested for your Old Priory Judo Club member account.</p>
+        <p style="margin:28px 0"><a href="${safeLink}" style="display:inline-block;background:#e21b23;color:#fff;text-decoration:none;font-weight:bold;padding:13px 20px;border-radius:999px">Reset your password</a></p>
+        <p>This single-use link expires in <strong>60 minutes</strong>.</p>
+        <p style="color:#62666b">${escapeHtml(uatLine)}</p>
+        <p>If the button does not work, copy and paste this address into your browser:</p>
+        <p style="word-break:break-all"><a href="${safeLink}">${safeLink}</a></p>
+        <hr style="border:0;border-top:1px solid #e5e8ee;margin:24px 0">
+        <p style="color:#62666b;font-size:13px">If you were not expecting this password reset, you can ignore this email. Your password will not change unless the reset link is used.</p>
+      </div>`
+  });
+
+  return resetDeliveryPage(user, link.toString(), delivery, mail.ok);
 }
+
 async function passwordResetPage(request, env) {
   const token = new URL(request.url).searchParams.get("token") || "";
   const reset = await lookupAccountToken(env, token, "reset");
