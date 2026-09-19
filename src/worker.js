@@ -4,8 +4,7 @@ const PBKDF2_ITERATIONS = 100000;
 const INVITE_DAYS = 7;
 const RESET_MINUTES = 60;
 
-export default {
-  async fetch(request, env) {
+async function handleRequest(request, env) {
     const url = new URL(request.url);
     const path = url.pathname;
 
@@ -61,9 +60,13 @@ export default {
           : setupPage(request, env);
       }
 
+      if (path === "/contact.html") {
+        return request.method === "GET" ? redirect("/contact") : methodNotAllowed();
+      }
+
       if (path === "/contact") {
         if (request.method === "POST") return handleContactForm(request, env);
-        if (request.method === "GET") return contactPage();
+        if (request.method === "GET") return contactPage(env);
         return methodNotAllowed();
       }
 
@@ -139,10 +142,27 @@ export default {
           </div>
         </div></section>`, 500);
     }
+}
+
+function applyEnvironmentHeaders(response, env) {
+  if (String(env.AUTH_ENVIRONMENT || "").toLowerCase() !== "uat") return response;
+
+  const headers = new Headers(response.headers);
+  headers.set("X-Robots-Tag", "noindex, nofollow");
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  });
+}
+
+export default {
+  async fetch(request, env) {
+    return applyEnvironmentHeaders(await handleRequest(request, env), env);
   }
 };
 
-function contactPage() {
+function contactPage(env) {
   return htmlPage("Contact", `
     <section class="page-hero">
       <div class="container">
@@ -206,8 +226,12 @@ function contactPage() {
           <div class="contact-honeypot" aria-hidden="true">
             <label>Leave this field empty<input type="text" name="website" tabindex="-1" autocomplete="off"></label>
           </div>
-          <div class="anti-spam-note"><strong>Spam protection</strong><span>A hidden spam check is active. Cloudflare Turnstile will be added before the public launch.</span></div>
-          <button class="btn red" type="submit">Send enquiry</button>
+          <div class="anti-spam-note"><strong>Spam protection</strong><span>This form is protected by Cloudflare Turnstile and a hidden spam check.</span></div>
+          ${env.TURNSTILE_SITEKEY
+            ? `<div class="cf-turnstile" data-sitekey="${escapeHtml(env.TURNSTILE_SITEKEY)}"></div>`
+            : `<div class="anti-spam-note"><strong>Form unavailable</strong><span>Spam protection is not configured yet.</span></div>`}
+          <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+          <button class="btn red" type="submit" ${env.TURNSTILE_SITEKEY ? "" : "disabled"}>Send enquiry</button>
           <small class="form-footnote">Your message is emailed to the club so they can respond to your enquiry.</small>
         </form>
       </div>
@@ -262,6 +286,22 @@ async function handleContactForm(request, env) {
           <div class="eyebrow">Contact</div>
           <h2>Check the form</h2>
           <p>Please provide your name, a valid email address, an enquiry type and a message.</p>
+          <a class="btn ghost" href="/contact">Back to contact form</a>
+        </div>
+      </div></section>`, 400);
+  }
+
+  const turnstileToken = String(form.get("cf-turnstile-response") || "");
+  const turnstile = await verifyTurnstile(turnstileToken, request, env);
+
+  if (!turnstile.success) {
+    console.warn("Turnstile validation failed", turnstile.errorCodes || []);
+    return htmlPage("Contact form", `
+      <section class="page-content"><div class="container auth-wrap">
+        <div class="page-card auth-card">
+          <div class="eyebrow">Contact</div>
+          <h2>Please verify you're human.</h2>
+          <p>The spam-protection check did not complete successfully. Please return to the form and try again.</p>
           <a class="btn ghost" href="/contact">Back to contact form</a>
         </div>
       </div></section>`, 400);
@@ -348,6 +388,39 @@ async function handleContactForm(request, env) {
         <a class="btn ghost" href="/contact">Send another enquiry</a>
       </div>
     </div></section>`);
+}
+
+async function verifyTurnstile(token, request, env) {
+  if (!token || !env.TURNSTILE_SECRET_KEY) {
+    return { success: false, errorCodes: ["missing-input"] };
+  }
+
+  try {
+    const body = new FormData();
+    body.append("secret", env.TURNSTILE_SECRET_KEY);
+    body.append("response", token);
+
+    const remoteIp = request.headers.get("CF-Connecting-IP");
+    if (remoteIp) body.append("remoteip", remoteIp);
+
+    const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST",
+      body
+    });
+
+    if (!response.ok) {
+      return { success: false, errorCodes: [`siteverify-http-${response.status}`] };
+    }
+
+    const result = await response.json();
+    return {
+      success: result.success === true,
+      errorCodes: Array.isArray(result["error-codes"]) ? result["error-codes"] : []
+    };
+  } catch (error) {
+    console.error("Turnstile verification error", error);
+    return { success: false, errorCodes: ["siteverify-unavailable"] };
+  }
 }
 
 async function loginPage(request, env) {
