@@ -1103,19 +1103,88 @@ async function adminMembersPage(request, env) {
   }).join("");
 
   const scopeNote = isUatEnvironment(env)
-    ? '<p class="auth-note">Invitations created in UAT are UAT-only. Production accounts remain available here for testing.</p>'
+    ? '<p class="auth-note">Invitations created in UAT are UAT-only. Production accounts remain available here for testing.</p>' +
+      (env.MAIL_TEST_RECIPIENT ? '<p class="auth-note">UAT email delivery is redirected to <strong>' + escapeHtml(env.MAIL_TEST_RECIPIENT) + '</strong>. The account itself will still be created for the email address entered above.</p>' : '')
     : "";
 
   return htmlPage("Member access",
     '<section class="page-hero"><div class="container"><div class="eyebrow">Administration</div><h1>Member access</h1><p class="lead">Invite members, manage access and issue password-reset links.</p></div></section>' +
     '<section class="page-content"><div class="container"><div class="admin-heading"><div><div class="eyebrow">Invite only</div><h2>Invite a member</h2></div><a class="btn ghost" href="/admin">Back to admin</a></div>' +
-    '<form class="page-card member-invite-form" method="post" action="/admin/members/invite"><label>Name<input type="text" name="display_name" required></label><label>Email address<input type="email" name="email" required></label><label>Role<select name="role"><option value="member" selected>Member</option><option value="admin">Administrator</option></select></label><div><button class="btn red" type="submit">Create invite</button></div>' + scopeNote + '</form>' +
+    '<form class="page-card member-invite-form" method="post" action="/admin/members/invite"><label>Name<input type="text" name="display_name" required></label><label>Email address<input type="email" name="email" required></label><label>Role<select name="role"><option value="member" selected>Member</option><option value="admin">Administrator</option></select></label><div><button class="btn red" type="submit">Create &amp; send invite</button></div>' + scopeNote + '</form>' +
     '<section class="admin-calendar-section"><h3>Members</h3><div class="member-admin-list">' + (userRows || '<div class="empty-state">No member accounts yet.</div>') + '</div></section>' +
     '<section class="admin-calendar-section"><h3>Pending invitations</h3><div class="member-admin-list">' + (inviteRows || '<div class="empty-state">No pending invitations.</div>') + '</div></section></div></section>');
 }
+async function sendTransactionalEmail(env, message) {
+  if (!env.RESEND_API_KEY) {
+    return { ok: false, error: "RESEND_API_KEY is not configured" };
+  }
+
+  try {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Authorization": \`Bearer \${env.RESEND_API_KEY}\`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        from: env.MAIL_FROM || env.CONTACT_FROM || "Old Priory Judo Club <onboarding@resend.dev>",
+        to: [message.to],
+        subject: message.subject,
+        text: message.text,
+        html: message.html
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("Transactional email failed", response.status, errorText);
+      return { ok: false, status: response.status, error: errorText };
+    }
+
+    let result = null;
+    try { result = await response.json(); } catch {}
+    return { ok: true, id: result?.id || "" };
+  } catch (error) {
+    console.error("Transactional email error", error);
+    return { ok: false, error: String(error) };
+  }
+}
+
+function mailDeliveryTarget(env, intendedRecipient) {
+  const testRecipient = String(env.MAIL_TEST_RECIPIENT || "").trim();
+  if (isUatEnvironment(env) && testRecipient) {
+    return {
+      recipient: testRecipient,
+      redirected: testRecipient.toLowerCase() !== String(intendedRecipient || "").toLowerCase()
+    };
+  }
+  return { recipient: intendedRecipient, redirected: false };
+}
+
+function inviteDeliveryPage(name, intendedEmail, link, delivery, sent, back = "/admin/members") {
+  const deliveryText = delivery.redirected
+    ? 'For UAT testing, the email was sent to <strong>' + escapeHtml(delivery.recipient) + '</strong> instead of ' + escapeHtml(intendedEmail) + '.'
+    : 'The invitation email was sent to <strong>' + escapeHtml(delivery.recipient) + '</strong>.';
+
+  const statusBlock = sent
+    ? '<div class="anti-spam-note"><strong>Email sent</strong><span>' + deliveryText + '</span></div>'
+    : '<div class="anti-spam-note"><strong>Email not sent</strong><span>The invitation was created successfully, but email delivery failed. You can still copy and send the link manually.</span></div>';
+
+  return htmlPage("Member invitation created",
+    '<section class="page-content"><div class="container auth-wrap"><div class="page-card auth-card">' +
+    '<div class="eyebrow">Administration</div><h2>Invitation created</h2>' +
+    '<p>An invitation for <strong>' + escapeHtml(name) + '</strong> (' + escapeHtml(intendedEmail) + ') has been created. The link expires in 7 days.</p>' +
+    statusBlock +
+    '<label>Invite link<input class="copy-link" type="text" readonly value="' + escapeHtml(link) + '"></label>' +
+    '<button class="btn red copy-link-button" type="button">Copy link</button>' +
+    '<a class="btn ghost" href="' + escapeHtml(back) + '">Back to member access</a>' +
+    '</div></div></section>');
+}
+
 async function createMemberInvite(request, env) {
   const admin = await requireAdmin(request, env);
   if (!admin) return forbidden();
+
   const form = await request.formData();
   const displayName = String(form.get("display_name") || "").trim();
   const email = String(form.get("email") || "").trim();
@@ -1139,9 +1208,48 @@ async function createMemberInvite(request, env) {
 
   const link = new URL("/join", request.url);
   link.searchParams.set("token", token);
-  const scopeMessage = accountScope === "uat_only" ? " This account will be available on UAT only." : "";
-  return linkPage("Member invitation created", "Send this single-use invitation link to the member. It expires in 7 days." + scopeMessage, link.toString(), "/admin/members");
+
+  const delivery = mailDeliveryTarget(env, email);
+  const safeName = escapeHtml(displayName);
+  const safeLink = escapeHtml(link.toString());
+  const scopeLine = accountScope === "uat_only"
+    ? "This is a UAT-only test account and will not exist on the live site."
+    : "This invitation is for the Old Priory Judo Club members area.";
+
+  const mail = await sendTransactionalEmail(env, {
+    to: delivery.recipient,
+    subject: "Your Old Priory Judo Club member account",
+    text: [
+      \`Hi \${displayName},\`,
+      "",
+      "You have been invited to the Old Priory Judo Club members area.",
+      "Use the link below to choose your password and activate your account:",
+      "",
+      link.toString(),
+      "",
+      "This single-use link expires in 7 days.",
+      scopeLine,
+      "",
+      "If you were not expecting this invitation, you can ignore this email."
+    ].join("\\n"),
+    html: \`
+      <div style="font-family:Arial,sans-serif;max-width:680px;margin:auto;color:#151515">
+        <h2 style="color:#24569a">Welcome to Old Priory Judo Club</h2>
+        <p>Hi \${safeName},</p>
+        <p>You have been invited to the Old Priory Judo Club members area.</p>
+        <p style="margin:28px 0"><a href="\${safeLink}" style="display:inline-block;background:#e21b23;color:#fff;text-decoration:none;font-weight:bold;padding:13px 20px;border-radius:999px">Complete your account</a></p>
+        <p>This single-use link expires in <strong>7 days</strong>.</p>
+        <p style="color:#62666b">\${escapeHtml(scopeLine)}</p>
+        <p>If the button does not work, copy and paste this address into your browser:</p>
+        <p style="word-break:break-all"><a href="\${safeLink}">\${safeLink}</a></p>
+        <hr style="border:0;border-top:1px solid #e5e8ee;margin:24px 0">
+        <p style="color:#62666b;font-size:13px">If you were not expecting this invitation, you can ignore this email.</p>
+      </div>\`
+  });
+
+  return inviteDeliveryPage(displayName, email, link.toString(), delivery, mail.ok);
 }
+
 async function joinPage(request, env) {
   const token = new URL(request.url).searchParams.get("token") || "";
   const invite = await lookupAccountToken(env, token, "invite");
