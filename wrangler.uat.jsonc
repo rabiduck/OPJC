@@ -29,6 +29,7 @@
   "vars": {
     "AUTH_ENVIRONMENT": "uat",
     "CONTACT_TO": "rabiduck@gmail.com",
+    "MAIL_TEST_RECIPIENT": "rabiduck@gmail.com",
     "RESOURCE_FILE_LIMIT_BYTES": 20971520,
     "RESOURCE_STORAGE_LIMIT_BYTES": 524288000
   },
