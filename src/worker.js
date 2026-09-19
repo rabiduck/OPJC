@@ -62,7 +62,7 @@ export default {
       }
 
       if (path === "/contact") {
-        if (request.method === "POST") return handleContactPrototype(request);
+        if (request.method === "POST") return handleContactForm(request, env);
         if (request.method === "GET") return contactPage();
         return methodNotAllowed();
       }
@@ -186,7 +186,7 @@ function contactPage() {
         <form class="page-card contact-form" method="post" action="/contact">
           <div class="eyebrow">Send an enquiry</div>
           <h2>Contact the club</h2>
-          <p>This prototype demonstrates the enquiry form. Messages are not yet delivered to a mailbox.</p>
+          <p>Send your enquiry to the club and we'll get back to you as soon as we can.</p>
           <div class="form-pair">
             <label>Your name<input type="text" name="name" autocomplete="name" maxlength="100" required></label>
             <label>Email address<input type="email" name="email" autocomplete="email" maxlength="200" required></label>
@@ -206,25 +206,56 @@ function contactPage() {
           <div class="contact-honeypot" aria-hidden="true">
             <label>Leave this field empty<input type="text" name="website" tabindex="-1" autocomplete="off"></label>
           </div>
-          <div class="anti-spam-note"><strong>Spam protection</strong><span>Cloudflare Turnstile will be enabled before the form goes live.</span></div>
+          <div class="anti-spam-note"><strong>Spam protection</strong><span>A hidden spam check is active. Cloudflare Turnstile will be added before the public launch.</span></div>
           <button class="btn red" type="submit">Send enquiry</button>
-          <small class="form-footnote">Prototype only — submitting this form does not send an email.</small>
+          <small class="form-footnote">Your message is emailed to the club so they can respond to your enquiry.</small>
         </form>
       </div>
     </section>`);
 }
 
-async function handleContactPrototype(request) {
+async function handleContactForm(request, env) {
   if (!sameOrigin(request)) return forbidden();
+
   const form = await request.formData();
   const name = String(form.get("name") || "").trim();
   const email = String(form.get("email") || "").trim();
+  const phone = String(form.get("phone") || "").trim();
   const subject = String(form.get("subject") || "").trim();
   const message = String(form.get("message") || "").trim();
   const website = String(form.get("website") || "").trim();
 
-  if (website) return redirect("/contact.html");
-  if (!name || !isEmail(email) || !subject || !message || name.length > 100 || email.length > 200 || message.length > 3000) {
+  const allowedSubjects = new Set([
+    "Free trial / new starter",
+    "Class information",
+    "Competition or grading",
+    "Existing member enquiry",
+    "General enquiry"
+  ]);
+
+  // Quietly accept honeypot submissions without sending mail.
+  if (website) {
+    return htmlPage("Enquiry received", `
+      <section class="page-content"><div class="container auth-wrap">
+        <div class="page-card auth-card">
+          <div class="eyebrow">Contact</div>
+          <h2>Thanks.</h2>
+          <p>Your enquiry has been received.</p>
+          <a class="btn red" href="/">Back to home</a>
+        </div>
+      </div></section>`);
+  }
+
+  if (
+    !name ||
+    !isEmail(email) ||
+    !allowedSubjects.has(subject) ||
+    !message ||
+    name.length > 100 ||
+    email.length > 200 ||
+    phone.length > 40 ||
+    message.length > 3000
+  ) {
     return htmlPage("Contact form", `
       <section class="page-content"><div class="container auth-wrap">
         <div class="page-card auth-card">
@@ -236,15 +267,85 @@ async function handleContactPrototype(request) {
       </div></section>`, 400);
   }
 
-  return htmlPage("Enquiry received", `
+  if (!env.RESEND_API_KEY || !env.CONTACT_TO) {
+    console.error("Contact email is not configured: missing RESEND_API_KEY or CONTACT_TO");
+    return htmlPage("Contact form", `
+      <section class="page-content"><div class="container auth-wrap">
+        <div class="page-card auth-card">
+          <div class="eyebrow">Contact</div>
+          <h2>We couldn't send that just now.</h2>
+          <p>The email service is temporarily unavailable. Please try again later or contact the club by telephone.</p>
+          <a class="btn ghost" href="/contact">Back to contact form</a>
+        </div>
+      </div></section>`, 503);
+  }
+
+  const safeName = escapeHtml(name);
+  const safeEmail = escapeHtml(email);
+  const safePhone = escapeHtml(phone || "Not provided");
+  const safeSubject = escapeHtml(subject);
+  const safeMessage = escapeHtml(message).replace(/\n/g, "<br>");
+
+  const mailResponse = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${env.RESEND_API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      from: env.CONTACT_FROM || "Old Priory Judo Club <onboarding@resend.dev>",
+      to: [env.CONTACT_TO],
+      reply_to: email,
+      subject: `[OPJC website] ${subject} — ${name}`,
+      text: [
+        "New enquiry from the Old Priory Judo Club website",
+        "",
+        `Name: ${name}`,
+        `Email: ${email}`,
+        `Telephone: ${phone || "Not provided"}`,
+        `Enquiry type: ${subject}`,
+        "",
+        "Message:",
+        message
+      ].join("\n"),
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:680px;margin:auto;color:#151515">
+          <h2 style="color:#24569a">New website enquiry</h2>
+          <p><strong>Name:</strong> ${safeName}</p>
+          <p><strong>Email:</strong> <a href="mailto:${safeEmail}">${safeEmail}</a></p>
+          <p><strong>Telephone:</strong> ${safePhone}</p>
+          <p><strong>Enquiry type:</strong> ${safeSubject}</p>
+          <hr style="border:0;border-top:1px solid #e5e8ee;margin:24px 0">
+          <p><strong>Message</strong></p>
+          <p>${safeMessage}</p>
+          <hr style="border:0;border-top:1px solid #e5e8ee;margin:24px 0">
+          <p style="color:#62666b;font-size:13px">Sent from the Old Priory Judo Club website contact form. Replying to this email will reply directly to the visitor.</p>
+        </div>`
+    })
+  });
+
+  if (!mailResponse.ok) {
+    const errorText = await mailResponse.text();
+    console.error("Resend contact email failed", mailResponse.status, errorText);
+    return htmlPage("Contact form", `
+      <section class="page-content"><div class="container auth-wrap">
+        <div class="page-card auth-card">
+          <div class="eyebrow">Contact</div>
+          <h2>We couldn't send that just now.</h2>
+          <p>Your message hasn't been sent. Please try again in a moment or contact the club by telephone.</p>
+          <a class="btn ghost" href="/contact">Back to contact form</a>
+        </div>
+      </div></section>`, 502);
+  }
+
+  return htmlPage("Enquiry sent", `
     <section class="page-content"><div class="container auth-wrap">
       <div class="page-card auth-card">
-        <div class="eyebrow">Prototype contact form</div>
-        <h2>Thanks, ${escapeHtml(name)}.</h2>
-        <p>The form has been accepted successfully. During the prototype phase no email is sent and the enquiry is not stored.</p>
-        <p>Once outbound mail is configured, this same form will deliver enquiries to the club mailbox after spam verification.</p>
+        <div class="eyebrow">Contact</div>
+        <h2>Thanks, ${safeName}.</h2>
+        <p>Your enquiry has been emailed to Old Priory Judo Club. Someone from the club will get back to you as soon as they can.</p>
         <a class="btn red" href="/">Back to home</a>
-        <a class="btn ghost" href="/contact">Back to contact</a>
+        <a class="btn ghost" href="/contact">Send another enquiry</a>
       </div>
     </div></section>`);
 }
